@@ -1,0 +1,929 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>School Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    :root {
+      --dark:   #0f172a;
+      --dark2:  #1e293b;
+      --accent: #f97316;
+      --accent2:#fb923c;
+      --soft:   #f0e4d4;
+      --bg:     #f2e8d8;
+      --card:   #faf4eb;
+      --text:   #1c1917;
+      --muted:  #78716c;
+      --border: #e0d4c4;
+      --sh-sm:  0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.05);
+      --sh-md:  0 4px 12px rgba(0,0,0,.08),0 2px 4px rgba(0,0,0,.05);
+      --sh-lg:  0 10px 24px rgba(0,0,0,.1),0 4px 8px rgba(0,0,0,.06);
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR',sans-serif;
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    /* ──────────── 사이드바 ──────────── */
+    #sidebar {
+      width: 360px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--card);
+      box-shadow: 4px 0 24px rgba(0,0,0,.13);
+      z-index: 1001;
+      overflow: hidden;
+    }
+
+    /* 헤더 */
+    .search-header {
+      background: linear-gradient(155deg, #4a3828 0%, #3d2e1a 55%, #2e2010 100%);
+      padding: 20px 18px 18px;
+      flex-shrink: 0;
+    }
+    .app-brand {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      margin-bottom: 18px;
+    }
+    .brand-icon {
+      width: 44px; height: 44px;
+      background: linear-gradient(135deg, var(--accent), #f59e0b);
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px;
+      box-shadow: 0 4px 14px rgba(249,115,22,.45);
+      flex-shrink: 0;
+    }
+    .brand-text h1 {
+      font-size: 28px; font-weight: 800;
+      color: #fff; letter-spacing: 2.5px;
+    }
+    .brand-text p {
+      font-size: 14.5px; color: rgba(255,255,255,.9);
+      margin-top: 3px;
+    }
+
+    .search-header select,
+    .search-header input {
+      display: block; width: 100%;
+      padding: 10px 14px;
+      border: 1.5px solid rgba(255,255,255,.1);
+      border-radius: 10px;
+      font-size: 13px;
+      margin-bottom: 10px;
+      background: rgba(255,255,255,.07);
+      color: #fff;
+      outline: none;
+      transition: border-color .2s, background .2s;
+    }
+    .search-header select option { background: #4a3828; color: #fff; }
+    .search-header select:focus,
+    .search-header input:focus {
+      border-color: var(--accent);
+      background: rgba(255,255,255,.12);
+    }
+    .search-header input::placeholder { color: rgba(255,255,255,.3); }
+
+    #search-btn {
+      width: 100%;
+      padding: 11px;
+      border: none; border-radius: 10px;
+      background: linear-gradient(135deg, var(--accent), #ea670a);
+      color: #fff;
+      font-size: 14px; font-weight: 700;
+      cursor: pointer; letter-spacing: .3px;
+      box-shadow: 0 4px 16px rgba(249,115,22,.45);
+      transition: opacity .15s, transform .1s, box-shadow .15s;
+    }
+    #search-btn:hover { opacity: .9; box-shadow: 0 6px 22px rgba(249,115,22,.55); }
+    #search-btn:active { transform: scale(.97); }
+
+    /* 결과 목록 */
+    #results { flex: 1; overflow-y: auto; background: var(--bg); }
+
+    .placeholder {
+      padding: 36px 20px; text-align: center;
+      color: var(--muted); font-size: 13px; line-height: 1.8;
+    }
+    .placeholder-emoji { font-size: 30px; margin-bottom: 10px; opacity: .4; }
+
+    .result-count {
+      padding: 9px 18px 7px;
+      font-size: 10.5px; font-weight: 700; letter-spacing: .6px;
+      color: var(--muted); text-transform: uppercase;
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .school-card {
+      padding: 12px 18px;
+      cursor: pointer;
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      border-left: 3px solid transparent;
+      transition: background .12s, border-left-color .12s;
+    }
+    .school-card:hover { background: var(--soft); border-left-color: var(--accent2); }
+    .school-card.selected { background: var(--soft); border-left-color: var(--accent); }
+
+    .sc-short {
+      font-size: 15px; font-weight: 800;
+      color: var(--accent); margin-bottom: 2px;
+      letter-spacing: -.3px;
+    }
+    .sc-full {
+      font-size: 11.5px; color: #a8a29e; margin-bottom: 4px;
+    }
+    .sc-meta {
+      font-size: 11px; color: var(--muted);
+      display: flex; align-items: center; gap: 6px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .sc-badge {
+      background: #ece4d8; color: #7a4020;
+      border-radius: 4px; padding: 1px 6px;
+      font-size: 10px; font-weight: 700; flex-shrink: 0;
+    }
+
+    /* 정보 패널 */
+    #info-panel {
+      display: none; flex-direction: column;
+      border-top: 3px solid var(--accent);
+      background: var(--card);
+      max-height: 64vh; overflow-y: auto; flex-shrink: 0;
+    }
+    #info-panel.show { display: flex; }
+
+    .info-top {
+      padding: 14px 16px 12px;
+      background: linear-gradient(135deg, #f5ece0 0%, #fdf8f2 100%);
+      border-bottom: 1px solid #e8d8c8;
+      display: flex; align-items: flex-start; gap: 10px;
+    }
+    #back-btn {
+      flex-shrink: 0;
+      background: var(--card); border: 1.5px solid var(--border);
+      border-radius: 8px; padding: 5px 11px;
+      font-size: 12px; cursor: pointer; color: var(--muted);
+      transition: all .15s;
+    }
+    #back-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    .info-name-block { flex: 1; }
+    #info-school-short {
+      font-size: 18px; font-weight: 900;
+      color: var(--accent); letter-spacing: -.5px; line-height: 1.25;
+    }
+    #info-school-name {
+      font-size: 12px; color: #a8a29e; margin-top: 3px;
+    }
+
+    .info-group-title {
+      padding: 8px 16px 3px;
+      font-size: 9.5px; font-weight: 700; letter-spacing: .8px;
+      color: var(--muted); text-transform: uppercase;
+      background: #f5ede4;
+    }
+    .info-row {
+      display: flex; gap: 10px;
+      padding: 8px 16px;
+      font-size: 13px;
+      border-bottom: 1px solid var(--border);
+      align-items: flex-start;
+    }
+    .info-label {
+      color: var(--muted); min-width: 60px; flex-shrink: 0;
+      font-size: 11px; padding-top: 1px; font-weight: 600;
+    }
+    .info-value { color: var(--text); line-height: 1.5; }
+    .info-value a { color: var(--accent); text-decoration: none; }
+    .info-value a:hover { text-decoration: underline; }
+
+    .stat-box {
+      display: flex; gap: 8px; padding: 10px 16px;
+    }
+    .stat-item {
+      flex: 1; background: var(--soft);
+      border-radius: 10px; padding: 10px 12px;
+      border: 1px solid #e0d0c0;
+    }
+    .stat-label {
+      font-size: 10px; font-weight: 700; color: #9a6040;
+      text-transform: uppercase; letter-spacing: .5px;
+    }
+    .stat-value {
+      font-size: 16px; font-weight: 800; color: var(--dark);
+      margin-top: 3px;
+    }
+    .stat-sub {
+      font-size: 10px; color: var(--muted); margin-top: 2px;
+    }
+
+
+    /* 철도역 */
+    .station-header {
+      padding: 9px 16px 5px;
+      font-size: 9.5px; font-weight: 700; letter-spacing: .8px;
+      color: var(--muted); text-transform: uppercase;
+      background: var(--bg); border-top: 1px solid var(--border);
+    }
+    .station-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 16px; border-bottom: 1px solid var(--border);
+      font-size: 13px;
+    }
+    .station-item:last-child { border-bottom: none; }
+    .station-badge {
+      flex-shrink: 0; color: #fff;
+      border-radius: 8px; padding: 2px 8px;
+      font-size: 10px; font-weight: 700;
+    }
+    .station-name { flex: 1; color: var(--text); }
+    .station-dist { color: var(--muted); font-size: 12px; }
+    .no-station { padding: 10px 16px; font-size: 13px; color: var(--muted); }
+
+    /* 지도 */
+    #map { flex: 1; }
+
+    /* 스피너 */
+    .spinner {
+      display: inline-block; width: 13px; height: 13px;
+      border: 2px solid var(--border); border-top-color: var(--accent);
+      border-radius: 50%; animation: spin .6s linear infinite;
+      vertical-align: middle; margin-right: 5px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* 스크롤 */
+    #results::-webkit-scrollbar, #info-panel::-webkit-scrollbar { width: 7px; }
+    #results::-webkit-scrollbar-track, #info-panel::-webkit-scrollbar-track {
+      background: #e8ddd0; border-radius: 4px;
+    }
+    #results::-webkit-scrollbar-thumb, #info-panel::-webkit-scrollbar-thumb {
+      background: #b8957a; border-radius: 4px;
+    }
+    #results::-webkit-scrollbar-thumb:hover, #info-panel::-webkit-scrollbar-thumb:hover {
+      background: var(--accent);
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── 사이드바 ── -->
+<div id="sidebar">
+  <div class="search-header">
+    <div class="app-brand">
+      <div class="brand-icon">🏫</div>
+      <div class="brand-text">
+        <h1>School Map</h1>
+        <p>학교 위치와 정보를 한눈에</p>
+      </div>
+    </div>
+    <select id="edu-sel">
+      <option value="">전체 교육청</option>
+      <option value="B10">서울특별시교육청</option>
+      <option value="C10">부산광역시교육청</option>
+      <option value="D10">대구광역시교육청</option>
+      <option value="E10">인천광역시교육청</option>
+      <option value="F10">광주광역시교육청</option>
+      <option value="G10">대전광역시교육청</option>
+      <option value="H10">울산광역시교육청</option>
+      <option value="I10">세종특별자치시교육청</option>
+      <option value="J10">경기도교육청</option>
+      <option value="K10">강원특별자치도교육청</option>
+      <option value="M10">충청북도교육청</option>
+      <option value="N10">충청남도교육청</option>
+      <option value="P10">전북특별자치도교육청</option>
+      <option value="Q10">전라남도교육청</option>
+      <option value="R10">경상북도교육청</option>
+      <option value="S10">경상남도교육청</option>
+      <option value="T10">제주특별자치도교육청</option>
+    </select>
+    <input type="text" id="school-input" placeholder="학교명을 입력하세요 (예: 관천초)" />
+    <button id="search-btn">검색</button>
+  </div>
+
+  <div id="results">
+    <div class="placeholder">
+      <div class="placeholder-emoji">🗺️</div>
+      시도교육청을 선택하고<br>학교명을 입력 후 검색하세요
+    </div>
+  </div>
+
+  <div id="info-panel">
+    <div class="info-top">
+      <button id="back-btn">← 목록</button>
+      <div class="info-name-block">
+        <div id="info-school-short"></div>
+        <div id="info-school-name"></div>
+      </div>
+    </div>
+
+    <div class="info-group-title">기본 정보</div>
+    <div class="info-row"><span class="info-label">주소</span><span class="info-value" id="info-addr"></span></div>
+    <div class="info-row"><span class="info-label">전화번호</span><span class="info-value" id="info-phone"></span></div>
+    <div class="info-row"><span class="info-label">홈페이지</span><span class="info-value" id="info-homepage"></span></div>
+
+    <div class="info-group-title">학교 현황</div>
+    <div class="stat-box">
+      <div class="stat-item">
+        <div class="stat-label">학급수</div>
+        <div class="stat-value" id="info-classes"><span class="spinner"></span></div>
+        <div class="stat-sub" id="info-grade-breakdown"></div>
+      </div>
+    </div>
+
+    <div class="station-header">🚉 가까운 역 (1km 이내)</div>
+    <div id="station-list"></div>
+
+  </div>
+</div>
+
+<!-- ── 지도 ── -->
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  // ── 지도 초기화 ─────────────────────────────────
+  const map = L.map('map').setView([36.5, 127.8], 7);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    maxZoom: 19,
+  }).addTo(map);
+
+  let schoolMarker        = null;
+  let stationMarkers      = [];
+  let nearbySchoolMarkers = [];
+  let lastResults         = [];
+  let selectedCard        = null;
+
+  // ── DOM ─────────────────────────────────────────
+  const eduSel      = document.getElementById('edu-sel');
+  const schoolInput = document.getElementById('school-input');
+  const searchBtn   = document.getElementById('search-btn');
+  const resultsEl   = document.getElementById('results');
+  const infoPanel   = document.getElementById('info-panel');
+  const backBtn     = document.getElementById('back-btn');
+
+  // ── 유틸 ────────────────────────────────────────
+  function esc(s) {
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function setText(id, val) { const el = document.getElementById(id); if (el) el.textContent = val ?? '-'; }
+  function setHtml(id, val) { const el = document.getElementById(id); if (el) el.innerHTML = val; }
+
+  // ── 학교명 단축 (예: 대구관천초등학교 → 관천초) ──
+  function shortenSchoolName(name) {
+    const cities = [
+      '서울특별시','부산광역시','대구광역시','인천광역시',
+      '광주광역시','대전광역시','울산광역시','세종특별자치시',
+      '서울','부산','대구','인천','광주','대전','울산','세종',
+      '경기','강원','충북','충남','전북','전남','경북','경남','제주',
+    ];
+    const types = [
+      ['초등학교','초'],['중학교','중'],['고등학교','고'],
+      ['유치원','유'],['특수학교','특'],
+    ];
+    let n = name;
+    const typeEntry  = types.find(([f]) => n.includes(f));
+    const typeSuffix = typeEntry?.[0] ?? '';
+    const typeShort  = typeEntry?.[1] ?? '';
+    for (const city of cities) {
+      if (n.startsWith(city)) {
+        const rest  = n.slice(city.length);
+        const core  = typeSuffix ? rest.replace(typeSuffix, '') : rest;
+        if (core.length >= 1) { n = rest; break; }
+      }
+    }
+    if (typeSuffix) n = n.replace(typeSuffix, typeShort);
+    return n;
+  }
+
+  function clearStationMarkers() {
+    stationMarkers.forEach(m => map.removeLayer(m));
+    stationMarkers = [];
+  }
+  function clearNearbySchoolMarkers() {
+    nearbySchoolMarkers.forEach(m => map.removeLayer(m));
+    nearbySchoolMarkers = [];
+  }
+
+  // ── 검색 ────────────────────────────────────────
+  async function doSearch() {
+    const name = schoolInput.value.trim();
+    if (!name) { alert('학교명을 입력하세요'); return; }
+
+    infoPanel.classList.remove('show');
+    clearStationMarkers();
+    clearNearbySchoolMarkers();
+    if (schoolMarker) { map.removeLayer(schoolMarker); schoolMarker = null; }
+    selectedCard = null;
+
+    resultsEl.innerHTML = '<div class="placeholder"><span class="spinner"></span> 검색 중...</div>';
+
+    const qs = new URLSearchParams({ name });
+    const edu = eduSel.value;
+    if (edu) qs.set('edu', edu);
+
+    try {
+      const res = await fetch('/api/schools?' + qs);
+      const data = await res.json();
+      lastResults = data.schools || [];
+      renderResults(lastResults);
+    } catch (e) {
+      resultsEl.innerHTML = '<div class="placeholder">오류: ' + esc(e.message) + '</div>';
+    }
+  }
+
+  function renderResults(schools) {
+    if (!schools.length) {
+      resultsEl.innerHTML =
+        '<div class="placeholder"><div class="placeholder-emoji">🔍</div>' +
+        '검색 결과가 없습니다<br><small>교육청을 변경하거나<br>학교명을 확인해 주세요</small></div>';
+      return;
+    }
+    const countHtml = '<div class="result-count">검색 결과 ' + schools.length + '개</div>';
+    const cardsHtml = schools.map(function(s, i) {
+      const short = shortenSchoolName(s.SCHUL_NM);
+      return (
+        '<div class="school-card" data-idx="' + i + '">' +
+          '<div class="sc-short">' + esc(short) + '</div>' +
+          '<div class="sc-full">' + esc(s.SCHUL_NM) + '</div>' +
+          '<div class="sc-meta">' +
+            '<span class="sc-badge">' + esc(s.SCHUL_KND_SC_NM) + '</span>' +
+            esc(s.ORG_RDNMA) +
+          '</div>' +
+        '</div>'
+      );
+    }).join('');
+    resultsEl.innerHTML = countHtml + cardsHtml;
+
+    resultsEl.querySelectorAll('.school-card').forEach(function(el) {
+      el.addEventListener('click', function() {
+        if (selectedCard) selectedCard.classList.remove('selected');
+        el.classList.add('selected');
+        selectedCard = el;
+        selectSchool(lastResults[+el.dataset.idx]);
+      });
+    });
+  }
+
+  // ── 학교 선택 ──────────────────────────────────
+  async function selectSchool(s) {
+    const short = shortenSchoolName(s.SCHUL_NM);
+    setText('info-school-short', short);
+    setText('info-school-name',  s.SCHUL_NM);
+    setText('info-addr',    s.ORG_RDNMA        || '정보 없음');
+    setText('info-phone',   s.ORG_TELNO         || '-');
+    const hp = s.HMPG_ADRES;
+    setHtml('info-homepage', hp
+      ? '<a href="' + esc(hp) + '" target="_blank" rel="noopener">' + esc(hp) + '</a>'
+      : '-');
+    setHtml('info-classes',  '<span class="spinner"></span>');
+    setText('info-grade-breakdown', '');
+    setHtml('station-list', '<div class="no-station"><span class="spinner"></span> 조회 중...</div>');
+    infoPanel.classList.add('show');
+
+    await Promise.all([
+      loadSchoolStats(s.ATPT_OFCDC_SC_CODE, s.SD_SCHUL_CODE, s.SCHUL_KND_SC_NM),
+      geocodeAndShow(s.SCHUL_NM, s.ORG_RDNMA, s),
+    ]);
+  }
+
+  // ── 학급수·학생수 ───────────────────────────────
+  async function loadSchoolStats(edu, code, schoolType) {
+    try {
+      const qs = new URLSearchParams({ edu, code, schoolType: schoolType || '' });
+      const res = await fetch('/api/schoolstats?' + qs);
+      const d   = await res.json();
+
+      if (d.classes) {
+        const yr = d.year ? ' (' + d.year + '년)' : '';
+        setHtml('info-classes', d.classes + '개' + yr);
+        setText('info-grade-breakdown', d.gradeBreakdown || '');
+      } else {
+        setText('info-classes', '-');
+      }
+    } catch (_) {
+      setText('info-classes', '조회 실패');
+    }
+  }
+
+  // ── 지오코딩 + 지도 표시 ───────────────────────
+  async function geocodeAndShow(schoolName, address, schoolData) {
+    clearNearbySchoolMarkers();
+    if (schoolMarker) { map.removeLayer(schoolMarker); schoolMarker = null; }
+
+    let lat = null, lon = null;
+
+    // NEIS 주소에서 괄호 안 구주소 제거 (예: "(침산동)", "(침산동, 칠성초등학교)")
+    const cleanAddr = (address || '').replace(/\s*\([^)]*\)/g, '').trim();
+
+    // 건물번호 제거 버전 (예: "침산남로32길 17" → "침산남로32길")
+    const addrNoNum = cleanAddr.replace(/\s+\d+(?:-\d+)?$/, '').trim();
+
+    // 골목길(X로N길)에서 메인 도로 추출 (예: "침산남로32길" → "침산남로")
+    const addrMainRoad = addrNoNum.replace(/(\S+(?:대로|로))\d+길/, '$1').trim();
+
+    // 시/도 추출 (예: "대구광역시")
+    const cityMatch = cleanAddr.match(/^(\S+(?:특별시|광역시|특별자치시|특별자치도|도))\s/);
+    const city = cityMatch ? cityMatch[1] : '';
+
+    const rawQueries = [
+      cleanAddr,
+      addrNoNum !== cleanAddr ? addrNoNum : '',
+      addrMainRoad !== addrNoNum ? addrMainRoad : '',
+      schoolName + (cleanAddr ? ' ' + cleanAddr : ''),
+      city ? schoolName + ' ' + city : '',
+      schoolName,
+    ].filter(Boolean);
+
+    // 중복 제거
+    const seen = new Set();
+    const queries = rawQueries.filter(q => { if (seen.has(q)) return false; seen.add(q); return true; });
+
+    // 1순위: 서버 지오코딩 (행정안전부/카카오/네이버 중 설정된 키 사용)
+    try {
+      const r = await fetch('/api/geocode?address=' + encodeURIComponent(cleanAddr || schoolName));
+      const d = await r.json();
+      if (d.result) { lat = d.result.lat; lon = d.result.lon; }
+    } catch (_) {}
+
+    // 2순위: Nominatim (API 키 없을 때 폴백)
+    if (lat === null) {
+      for (const q of queries) {
+        try {
+          const r = await fetch(
+            'https://nominatim.openstreetmap.org/search?q=' + encodeURIComponent(q) +
+            '&format=json&limit=1&countrycodes=kr',
+            { headers: { 'Accept-Language': 'ko', 'User-Agent': 'DGESchoolApp/1.0' } }
+          );
+          const d = await r.json();
+          if (d.length) { lat = parseFloat(d[0].lat); lon = parseFloat(d[0].lon); break; }
+        } catch (_) {}
+      }
+    }
+
+    // OSM 학교 POI로 좌표 보정 (NEIS명 "대구칠성초" → OSM명 "칠성초" 불일치 처리)
+    const amenity = (schoolData.SCHUL_KND_SC_NM || '').includes('유치') ? 'kindergarten' : 'school';
+
+    // NEIS 학교명에서 도시 접두사를 제거한 변형 생성 ("대구칠성초등학교" → "칠성초등학교")
+    function osmNameVariants(name) {
+      var prefixes = ['서울','부산','대구','인천','광주','대전','울산','세종',
+                      '경기','강원','충북','충남','전북','전남','경북','경남','제주'];
+      for (var pi = 0; pi < prefixes.length; pi++) {
+        if (name.startsWith(prefixes[pi])) return [name, name.slice(prefixes[pi].length)];
+      }
+      return [name];
+    }
+
+    function buildNameLines(variants, amenityType, areaExpr) {
+      var lines = [];
+      variants.forEach(function(v) {
+        lines.push('  node["amenity"="' + amenityType + '"]["name"="' + v + '"](' + areaExpr + ');');
+        lines.push('  way["amenity"="' + amenityType + '"]["name"="' + v + '"](' + areaExpr + ');');
+        lines.push('  node["amenity"="' + amenityType + '"]["name:ko"="' + v + '"](' + areaExpr + ');');
+        lines.push('  way["amenity"="' + amenityType + '"]["name:ko"="' + v + '"](' + areaExpr + ');');
+      });
+      return lines;
+    }
+
+    var variants = osmNameVariants(schoolName);
+
+    // bbox 보정 (Nominatim 좌표가 있으면 0.15° 반경, 없으면 전국)
+    if (lat !== null) {
+      var b = 0.15;
+      var bbox = (lat - b) + ',' + (lon - b) + ',' + (lat + b) + ',' + (lon + b);
+      var snapQ = ['[out:json][timeout:20];(']
+        .concat(buildNameLines(variants, amenity, bbox))
+        .concat([');', 'out center 1;']).join('\n');
+      await overpassFetch(snapQ, function(el) {
+        var slat = parseFloat(el.lat ?? el.center?.lat);
+        var slon = parseFloat(el.lon ?? el.center?.lon);
+        if (!Number.isNaN(slat) && !Number.isNaN(slon)) { lat = slat; lon = slon; }
+      });
+    }
+
+    // 좌표가 여전히 없거나 snap 실패 → 전국 검색
+    if (lat === null) {
+      var natQ = ['[out:json][timeout:25];(']
+        .concat(buildNameLines(variants, amenity, '33,124,39,132'))
+        .concat([');', 'out center 1;']).join('\n');
+      await overpassFetch(natQ, function(el) {
+        lat = parseFloat(el.lat ?? el.center?.lat);
+        lon = parseFloat(el.lon ?? el.center?.lon);
+      });
+    }
+
+    if (lat === null) {
+      return;
+    }
+
+    map.setView([lat, lon], 16);
+
+    const shortName = shortenSchoolName(schoolData.SCHUL_NM);
+    schoolMarker = L.marker([lat, lon], {
+      icon: L.divIcon({
+        className: '',
+        html:
+          '<div style="' +
+            'position:relative;' +
+            'display:inline-flex;align-items:center;gap:6px;' +
+            'background:linear-gradient(135deg,#f97316,#ea670a);' +
+            'color:#fff;' +
+            'padding:8px 14px 8px 10px;' +
+            'border-radius:10px 10px 10px 0;' +
+            'font-size:14px;font-weight:900;white-space:nowrap;' +
+            'box-shadow:0 4px 18px rgba(249,115,22,.6),0 2px 6px rgba(0,0,0,.3);' +
+            'border:2px solid #fff;' +
+            'font-family:Apple SD Gothic Neo,Malgun Gothic,sans-serif;' +
+            'letter-spacing:-.3px;' +
+          '"><span style="font-size:16px">🏫</span>' + esc(shortName) + '</div>',
+        iconAnchor: [0, 44],
+      }),
+    })
+      .addTo(map)
+      .bindPopup(
+        '<b>' + esc(schoolData.SCHUL_NM) + '</b><br>' +
+        esc(schoolData.SCHUL_KND_SC_NM || '') + '<br>' +
+        '<small>' + esc(schoolData.ORG_RDNMA || '') + '</small>'
+      )
+      .openPopup();
+
+    await loadStations(lat, lon);
+    await new Promise(function(r) { setTimeout(r, 800); });
+    await loadNearbySchools(lat, lon, schoolData.SCHUL_KND_SC_NM || '', schoolData.SCHUL_NM);
+  }
+
+  // ── 학교명에서 학교 유형 추론 ──────────────────
+  function inferSchoolType(name) {
+    if (name.includes('초등')) return '초등학교';
+    if (name.includes('중학')) return '중학교';
+    if (name.includes('고등')) return '고등학교';
+    if (name.includes('유치')) return '유치원';
+    if (name.includes('특수')) return '특수학교';
+    return '';
+  }
+
+  // ── Overpass 공통 호출 (미러 자동 전환) ────────────
+  var OVERPASS_MIRRORS = [
+    'https://overpass-api.de/api/interpreter',
+    'https://overpass.kumi.systems/api/interpreter',
+    'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+  ];
+  async function overpassFetch(query, onFirstElement) {
+    for (var i = 0; i < OVERPASS_MIRRORS.length; i++) {
+      try {
+        var res = await fetch(OVERPASS_MIRRORS[i], {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'data=' + encodeURIComponent(query),
+        });
+        if (!res.ok) continue;
+        var d = await res.json();
+        var el = (d.elements || [])[0];
+        if (el && onFirstElement) onFirstElement(el);
+        return d.elements || [];
+      } catch (_) {}
+    }
+    return [];
+  }
+
+  // ── 거리 계산 (m) ───────────────────────────────
+  function calcDist(lat1, lon1, lat2, lon2) {
+    const R = 6371000;
+    const φ1 = lat1 * Math.PI / 180, φ2 = lat2 * Math.PI / 180;
+    const Δφ = (lat2 - lat1) * Math.PI / 180;
+    const Δλ = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(Δφ/2)**2 + Math.cos(φ1)*Math.cos(φ2)*Math.sin(Δλ/2)**2;
+    return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
+  }
+
+  // ── 반경 5km 학교 — 브라우저에서 Overpass 직접 호출 ──
+  async function loadNearbySchools(lat, lon, schoolType, searchedName) {
+    clearNearbySchoolMarkers();
+
+    const isKindergarten = (schoolType || '').includes('유치');
+    const amenity = isKindergarten ? 'kindergarten' : 'school';
+    const query = [
+      '[out:json][timeout:30];',
+      '(',
+      `  node["amenity"="${amenity}"](around:5000,${lat},${lon});`,
+      `  way["amenity"="${amenity}"](around:5000,${lat},${lon});`,
+      ');',
+      'out center;',
+    ].join('\n');
+
+    var elements = await overpassFetch(query, null);
+
+    const TYPE_KW = { '초등학교':'초등','중학교':'중학','고등학교':'고등','유치원':'유치','특수학교':'특수' };
+    const filterKw = (Object.entries(TYPE_KW).find(([k]) => (schoolType||'').includes(k)) || [])[1] || null;
+    const searchedShort = searchedName ? shortenSchoolName(searchedName) : '';
+    const seenNames = new Set();
+
+    elements
+      .map(function(el) {
+        const eLat = el.lat ?? el.center?.lat;
+        const eLon = el.lon ?? el.center?.lon;
+        if (!eLat || !eLon) return null;
+        const name = el.tags?.['name:ko'] || el.tags?.name || '';
+        if (!name) return null;
+        if (filterKw && !name.includes(filterKw)) return null;
+        return { name, lat: eLat, lon: eLon, distance: calcDist(lat, lon, eLat, eLon) };
+      })
+      .filter(Boolean)
+      .sort(function(a, b) { return a.distance - b.distance; })
+      .filter(function(s) {
+        if (seenNames.has(s.name)) return false;
+        seenNames.add(s.name);
+        return true;
+      })
+      .forEach(function(s) {
+        const shortName = shortenSchoolName(s.name);
+        if (searchedShort && shortName === searchedShort) return;
+
+        const distTxt = s.distance < 1000 ? s.distance + 'm' : (s.distance/1000).toFixed(1) + 'km';
+        const icon = L.divIcon({
+          className: '',
+          html:
+            '<div style="' +
+              'display:inline-flex;align-items:center;gap:4px;' +
+              'background:#fff;' +
+              'border:2px solid #f97316;' +
+              'border-radius:8px 8px 8px 0;' +
+              'padding:5px 10px 5px 7px;' +
+              'font-size:12px;font-weight:800;' +
+              'color:#c2410c;' +
+              'white-space:nowrap;' +
+              'box-shadow:0 3px 12px rgba(0,0,0,.25),0 1px 4px rgba(249,115,22,.3);' +
+              'font-family:Apple SD Gothic Neo,Malgun Gothic,sans-serif;' +
+              'cursor:pointer' +
+            '"><span style="font-size:13px">📍</span>' + esc(shortName) + '</div>',
+          iconAnchor: [0, 36],
+        });
+        const m = L.marker([s.lat, s.lon], { icon }).addTo(map);
+        m.bindPopup(
+          '<b>' + esc(s.name) + '</b><br>' +
+          '<small style="color:#78716c">🏫 인근 학교 · ' + esc(distTxt) + '<br>클릭하면 이 학교 중심으로 탐색</small>'
+        );
+        m.on('click', function() { jumpToNearbySchool(s); });
+        nearbySchoolMarkers.push(m);
+      });
+  }
+
+  // ── 인근 학교 클릭 → 해당 학교 중심으로 재탐색 ──
+  async function jumpToNearbySchool(s) {
+    const shortName = shortenSchoolName(s.name);
+
+    setText('info-school-short', shortName);
+    setText('info-school-name', s.name);
+    setText('info-addr', '정보 로딩 중...');
+    setText('info-phone', '-');
+    setHtml('info-homepage', '-');
+    setHtml('info-classes', '<span class="spinner"></span>');
+    setHtml('info-students', '<span class="spinner"></span>');
+    setText('info-grade-breakdown', '');
+    setText('info-students-sub', '');
+    setHtml('station-list', '<div class="no-station"><span class="spinner"></span> 조회 중...</div>');
+    infoPanel.classList.add('show');
+
+    clearStationMarkers();
+    clearNearbySchoolMarkers();
+    if (schoolMarker) { map.removeLayer(schoolMarker); schoolMarker = null; }
+
+    map.setView([s.lat, s.lon], 16);
+
+    schoolMarker = L.marker([s.lat, s.lon], {
+      icon: L.divIcon({
+        className: '',
+        html:
+          '<div style="' +
+            'position:relative;' +
+            'display:inline-flex;align-items:center;gap:6px;' +
+            'background:linear-gradient(135deg,#f97316,#ea670a);' +
+            'color:#fff;' +
+            'padding:8px 14px 8px 10px;' +
+            'border-radius:10px 10px 10px 0;' +
+            'font-size:14px;font-weight:900;white-space:nowrap;' +
+            'box-shadow:0 4px 18px rgba(249,115,22,.6),0 2px 6px rgba(0,0,0,.3);' +
+            'border:2px solid #fff;' +
+            'font-family:Apple SD Gothic Neo,Malgun Gothic,sans-serif;' +
+            'letter-spacing:-.3px;' +
+          '"><span style="font-size:16px">🏫</span>' + esc(shortName) + '</div>',
+        iconAnchor: [0, 44],
+      }),
+    }).addTo(map).bindPopup('<b>' + esc(s.name) + '</b>').openPopup();
+
+    await loadStations(s.lat, s.lon);
+    await new Promise(function(r) { setTimeout(r, 800); });
+    await loadNearbySchools(s.lat, s.lon, inferSchoolType(s.name), s.name);
+
+    // 백그라운드에서 NEIS 상세 정보 로드
+    try {
+      const qs = new URLSearchParams({ name: s.name });
+      const res = await fetch('/api/schools?' + qs);
+      const data = await res.json();
+      const schools = data.schools || [];
+      const match = schools.find(function(sc) { return sc.SCHUL_NM === s.name; }) || schools[0];
+      if (match) {
+        setText('info-addr',    match.ORG_RDNMA        || '정보 없음');
+        setText('info-phone',   match.ORG_TELNO         || '-');
+        const hp = match.HMPG_ADRES;
+        setHtml('info-homepage', hp
+          ? '<a href="' + esc(hp) + '" target="_blank" rel="noopener">' + esc(hp) + '</a>'
+          : '-');
+        lastResults = schools;
+        renderResults(schools);
+        await loadSchoolStats(match.ATPT_OFCDC_SC_CODE, match.SD_SCHUL_CODE, match.SCHUL_KND_SC_NM);
+      }
+    } catch (e) {
+      setText('info-addr', '정보 조회 실패');
+    }
+  }
+
+  // ── 역 (지하철 파란색, 철도 보라색) ────────────────
+  async function loadStations(lat, lon) {
+    const query = [
+      '[out:json][timeout:20];',
+      '(',
+      `  node["railway"="station"](around:1000,${lat},${lon});`,
+      `  node["railway"="halt"](around:1000,${lat},${lon});`,
+      `  node["public_transport"="stop_position"]["subway"="yes"](around:1000,${lat},${lon});`,
+      ');',
+      'out body;',
+    ].join('\n');
+
+    const elements = await overpassFetch(query, null);
+
+    if (!elements.length) {
+      setHtml('station-list', '<div class="no-station">1km 이내 역이 없습니다</div>');
+      return;
+    }
+
+    const seen = new Set();
+    const stations = elements
+      .map(function(el) {
+        const tags = el.tags || {};
+        const name = tags['name:ko'] || tags.name || '';
+        if (!name) return null;
+        const isSubway = tags.station === 'subway' || tags.subway === 'yes' || tags.public_transport === 'stop_position';
+        const dist = calcDist(lat, lon, el.lat, el.lon);
+        return { name, isSubway, lat: el.lat, lon: el.lon, dist };
+      })
+      .filter(Boolean)
+      .sort(function(a, b) { return a.dist - b.dist; })
+      .filter(function(s) {
+        if (seen.has(s.name)) return false;
+        seen.add(s.name);
+        return true;
+      });
+
+    const html = stations.map(function(st) {
+      const distTxt = st.dist < 1000 ? st.dist + 'm' : (st.dist/1000).toFixed(1) + 'km';
+      const color   = st.isSubway ? '#0284c7' : '#7c3aed';
+      const label   = st.isSubway ? '지하철' : '철도';
+      const icon    = st.isSubway ? '🚇' : '🚆';
+      const m = L.circleMarker([st.lat, st.lon], {
+        radius: 8, fillColor: color, color: '#fff', weight: 2, fillOpacity: .9,
+      }).addTo(map).bindPopup(icon + ' ' + esc(st.name) + ' (' + distTxt + ')');
+      stationMarkers.push(m);
+      return (
+        '<div class="station-item">' +
+          '<span class="station-badge" style="background:' + color + '">' + label + '</span>' +
+          '<span class="station-name">' + esc(st.name) + '</span>' +
+          '<span class="station-dist">' + distTxt + '</span>' +
+        '</div>'
+      );
+    }).join('');
+    setHtml('station-list', html);
+  }
+
+  // ── 이벤트 ──────────────────────────────────────
+  searchBtn.addEventListener('click', doSearch);
+  schoolInput.addEventListener('keydown', function(e) { if (e.key === 'Enter') doSearch(); });
+
+  backBtn.addEventListener('click', function() {
+    infoPanel.classList.remove('show');
+    clearStationMarkers();
+    clearNearbySchoolMarkers();
+    if (schoolMarker) { map.removeLayer(schoolMarker); schoolMarker = null; }
+    if (selectedCard) { selectedCard.classList.remove('selected'); selectedCard = null; }
+  });
+})();
+</script>
+</body>
+</html>
