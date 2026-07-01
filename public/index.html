@@ -562,8 +562,9 @@
     const queries = rawQueries.filter(q => { if (seen.has(q)) return false; seen.add(q); return true; });
 
     // 1·2순위 병렬: 서버 지오코딩 + Nominatim 첫 쿼리 동시 실행
+    var geocodeQs = new URLSearchParams({ address: cleanAddr || schoolName, name: schoolName });
     var [serverCoord, nomCoord] = await Promise.all([
-      fetch('/api/geocode?address=' + encodeURIComponent(cleanAddr || schoolName))
+      fetch('/api/geocode?' + geocodeQs)
         .then(function(r) { return r.json(); }).then(function(d) { return d.result || null; }).catch(function() { return null; }),
       nominatimFetch(queries[0]),
     ]);
