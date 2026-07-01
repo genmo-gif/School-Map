@@ -748,6 +748,17 @@
     return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
   }
 
+  // 학교 유형 매칭 (축약명 포함: 칠성초, 관천중, 경신고 등)
+  function matchesSchoolType(name, schoolType) {
+    if (!schoolType) return true;
+    if (schoolType.includes('초등')) return name.includes('초등') || /초$/.test(name);
+    if (schoolType.includes('중학')) return name.includes('중학') || /중$/.test(name);
+    if (schoolType.includes('고등')) return name.includes('고등') || /고$/.test(name);
+    if (schoolType.includes('유치')) return name.includes('유치') || /유$/.test(name);
+    if (schoolType.includes('특수')) return name.includes('특수');
+    return true;
+  }
+
   // ── 반경 5km 학교 — Nominatim amenity 검색 (Overpass보다 안정적)
   async function loadNearbySchools(lat, lon, schoolType, searchedName) {
     clearNearbySchoolMarkers();
@@ -791,6 +802,7 @@
         if (isNaN(sLat) || isNaN(sLon)) return null;
         const name = (item.display_name || '').split(',')[0].trim();
         if (!name) return null;
+        if (!matchesSchoolType(name, schoolType)) return null;
         const dist = calcDist(lat, lon, sLat, sLon);
         if (dist > 5000) return null;
         return { name: name, lat: sLat, lon: sLon, distance: dist };
@@ -957,10 +969,22 @@
       const distTxt = st.dist < 1000 ? st.dist + 'm' : (st.dist/1000).toFixed(1) + 'km';
       const color   = st.isSubway ? '#0284c7' : '#7c3aed';
       const label   = st.isSubway ? '지하철' : '철도';
-      const icon    = st.isSubway ? '🚇' : '🚆';
-      const m = L.circleMarker([st.lat, st.lon], {
-        radius: 8, fillColor: color, color: '#fff', weight: 2, fillOpacity: .9,
-      }).addTo(map).bindPopup(icon + ' ' + esc(st.name) + ' (' + distTxt + ')');
+      const emoji   = st.isSubway ? '🚇' : '🚆';
+      const stIcon  = L.divIcon({
+        className: '',
+        html: '<div style="' +
+          'display:inline-flex;align-items:center;gap:3px;' +
+          'background:' + color + ';color:#fff;' +
+          'padding:4px 9px 4px 6px;' +
+          'border-radius:6px 6px 6px 0;' +
+          'font-size:11px;font-weight:700;white-space:nowrap;' +
+          'box-shadow:0 2px 10px rgba(0,0,0,.35);' +
+          'font-family:Apple SD Gothic Neo,Malgun Gothic,sans-serif;' +
+          '"><span style="font-size:13px">' + emoji + '</span>' + esc(st.name) + '</div>',
+        iconAnchor: [0, 30],
+      });
+      const m = L.marker([st.lat, st.lon], { icon: stIcon })
+        .addTo(map).bindPopup(emoji + ' ' + esc(st.name) + ' · ' + distTxt);
       stationMarkers.push(m);
       return (
         '<div class="station-item">' +
