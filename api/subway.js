@@ -21,17 +21,19 @@ function lineLabel(tags) {
 }
 
 module.exports = async (req, res) => {
-  const { lat, lon } = req.query;
+  const { lat, lon, radius = '3000' } = req.query;
   if (!lat || !lon) {
     return res.status(400).json({ error: 'lat, lon 파라미터가 필요합니다', stations: [] });
   }
 
+  const r = Math.min(parseInt(radius, 10) || 3000, 5000);
+
   const query = [
-    '[out:json][timeout:15];',
+    '[out:json][timeout:20];',
     '(',
-    `  node["railway"="station"](around:1000,${lat},${lon});`,
-    `  node["railway"="halt"](around:1000,${lat},${lon});`,
-    `  node["public_transport"="stop_position"]["subway"="yes"](around:1000,${lat},${lon});`,
+    `  node["railway"="station"](around:${r},${lat},${lon});`,
+    `  node["railway"="halt"](around:${r},${lat},${lon});`,
+    `  node["public_transport"="stop_position"]["subway"="yes"](around:${r},${lat},${lon});`,
     ');',
     'out body;',
   ].join('\n');

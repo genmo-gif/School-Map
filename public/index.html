@@ -942,46 +942,25 @@
 
   // ── 역 (지하철 파란색, 철도 보라색) ────────────────
   async function loadStations(lat, lon) {
-    const query = [
-      '[out:json][timeout:15];',
-      '(',
-      `  node["railway"="station"](around:3000,${lat},${lon});`,
-      `  node["railway"="halt"](around:3000,${lat},${lon});`,
-      `  node["public_transport"="stop_position"]["subway"="yes"](around:3000,${lat},${lon});`,
-      ');',
-      'out body;',
-    ].join('\n');
+    var data = null;
+    try {
+      var r = await fetch('/api/subway?' + new URLSearchParams({ lat: lat, lon: lon, radius: '3000' }));
+      if (r.ok) data = await r.json();
+    } catch (_) {}
 
-    const elements = await overpassFetch(query, null, 12000);
+    var stations = (data && data.stations) ? data.stations : [];
 
-    if (!elements.length) {
+    if (!stations.length) {
       setHtml('station-list', '<div class="no-station">1km 이내 역이 없습니다</div>');
       return;
     }
 
-    const seen = new Set();
-    const stations = elements
-      .map(function(el) {
-        const tags = el.tags || {};
-        const name = tags['name:ko'] || tags.name || '';
-        if (!name) return null;
-        const isSubway = tags.station === 'subway' || tags.subway === 'yes' || tags.public_transport === 'stop_position';
-        const dist = calcDist(lat, lon, el.lat, el.lon);
-        return { name, isSubway, lat: el.lat, lon: el.lon, dist };
-      })
-      .filter(Boolean)
-      .sort(function(a, b) { return a.dist - b.dist; })
-      .filter(function(s) {
-        if (seen.has(s.name)) return false;
-        seen.add(s.name);
-        return true;
-      });
-
     // 지도 마커: 3km 이내 전체 (지하철=파랑, 철도=보라)
     stations.forEach(function(st) {
-      const distTxt = st.dist < 1000 ? st.dist + 'm' : (st.dist / 1000).toFixed(1) + 'km';
-      const color = st.isSubway ? '#0284c7' : '#7c3aed';
-      const emoji = st.isSubway ? '🚇' : '🚆';
+      const distTxt = st.distance < 1000 ? st.distance + 'm' : (st.distance / 1000).toFixed(1) + 'km';
+      const isSubway = st.type === 'subway';
+      const color = isSubway ? '#0284c7' : '#7c3aed';
+      const emoji = isSubway ? '🚇' : '🚆';
       const stIcon = L.divIcon({
         className: '',
         html: '<div style="' +
@@ -1001,15 +980,16 @@
     });
 
     // 패널: 1km 이내만 표시
-    const nearStations = stations.filter(function(s) { return s.dist <= 1000; });
+    const nearStations = stations.filter(function(s) { return s.distance <= 1000; });
     if (!nearStations.length) {
       setHtml('station-list', '<div class="no-station">1km 이내 역이 없습니다</div>');
       return;
     }
     const html = nearStations.map(function(st) {
-      const distTxt = st.dist < 1000 ? st.dist + 'm' : (st.dist / 1000).toFixed(1) + 'km';
-      const color = st.isSubway ? '#0284c7' : '#7c3aed';
-      const label = st.isSubway ? '지하철' : '철도';
+      const distTxt = st.distance < 1000 ? st.distance + 'm' : (st.distance / 1000).toFixed(1) + 'km';
+      const isSubway = st.type === 'subway';
+      const color = isSubway ? '#0284c7' : '#7c3aed';
+      const label = isSubway ? '지하철' : '철도';
       return (
         '<div class="station-item">' +
           '<span class="station-badge" style="background:' + color + '">' + label + '</span>' +
