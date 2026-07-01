@@ -344,7 +344,7 @@
       </div>
     </div>
 
-    <div class="station-header">🚉 가까운 역 (1km 이내)</div>
+    <div class="station-header">🚉 가까운 역 (3km 이내)</div>
     <div id="station-list"></div>
 
   </div>
@@ -569,8 +569,20 @@
       nominatimFetch(queries[0]),
     ]);
 
-    if (serverCoord) { lat = serverCoord.lat; lon = serverCoord.lon; }
-    else if (nomCoord) { lat = nomCoord.lat; lon = nomCoord.lon; }
+    if (serverCoord && nomCoord) {
+      // 두 좌표가 500m 이상 차이나면 NEIS 도로명주소 기반 Nominatim을 신뢰
+      const coordGap = calcDist(serverCoord.lat, serverCoord.lon, nomCoord.lat, nomCoord.lon);
+      if (coordGap > 500) {
+        console.warn('[geocode] 카카오↔Nominatim 차이 ' + Math.round(coordGap) + 'm → Nominatim 우선');
+        lat = nomCoord.lat; lon = nomCoord.lon;
+      } else {
+        lat = serverCoord.lat; lon = serverCoord.lon;
+      }
+    } else if (serverCoord) {
+      lat = serverCoord.lat; lon = serverCoord.lon;
+    } else if (nomCoord) {
+      lat = nomCoord.lat; lon = nomCoord.lon;
+    }
 
     // Nominatim 추가 쿼리 (첫 병렬 시도 실패 시)
     if (lat === null) {
@@ -765,7 +777,7 @@
 
     const isKindergarten = (schoolType || '').includes('유치');
     const amenity = isKindergarten ? 'kindergarten' : 'school';
-    const dlat = 0.045, dlon = 0.06;
+    const dlat = 0.027, dlon = 0.036;
     // Nominatim viewbox: left,top,right,bottom = minLon,maxLat,maxLon,minLat
     const viewbox = (lon - dlon) + ',' + (lat + dlat) + ',' + (lon + dlon) + ',' + (lat - dlat);
     const url = 'https://nominatim.openstreetmap.org/search?' + new URLSearchParams({
@@ -804,7 +816,7 @@
         if (!name) return null;
         if (!matchesSchoolType(name, schoolType)) return null;
         const dist = calcDist(lat, lon, sLat, sLon);
-        if (dist > 5000) return null;
+        if (dist > 3000) return null;
         return { name: name, lat: sLat, lon: sLon, distance: dist };
       })
       .filter(Boolean)
@@ -931,19 +943,19 @@
   // ── 역 (지하철 파란색, 철도 보라색) ────────────────
   async function loadStations(lat, lon) {
     const query = [
-      '[out:json][timeout:10];',
+      '[out:json][timeout:15];',
       '(',
-      `  node["railway"="station"](around:1000,${lat},${lon});`,
-      `  node["railway"="halt"](around:1000,${lat},${lon});`,
-      `  node["public_transport"="stop_position"]["subway"="yes"](around:1000,${lat},${lon});`,
+      `  node["railway"="station"](around:3000,${lat},${lon});`,
+      `  node["railway"="halt"](around:3000,${lat},${lon});`,
+      `  node["public_transport"="stop_position"]["subway"="yes"](around:3000,${lat},${lon});`,
       ');',
       'out body;',
     ].join('\n');
 
-    const elements = await overpassFetch(query, null);
+    const elements = await overpassFetch(query, null, 12000);
 
     if (!elements.length) {
-      setHtml('station-list', '<div class="no-station">1km 이내 역이 없습니다</div>');
+      setHtml('station-list', '<div class="no-station">3km 이내 역이 없습니다</div>');
       return;
     }
 
