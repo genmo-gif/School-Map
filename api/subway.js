@@ -22,6 +22,7 @@ module.exports = async (req, res) => {
 
   const subwayStations = [];
   const railwayStations = [];
+  const debugInfo = { kakaoKeySet: !!KAKAO_KEY, kakaoStatus: null, kakaoCount: 0, overpassStatus: null };
 
   // ── 1: Kakao SW8(지하철역) 카테고리 검색 ──────────
   if (KAKAO_KEY) {
@@ -34,8 +35,10 @@ module.exports = async (req, res) => {
         { headers: { Authorization: 'KakaoAK ' + KAKAO_KEY }, signal: ctrl.signal },
       );
       clearTimeout(timer);
+      debugInfo.kakaoStatus = kakaoRes.status;
       if (kakaoRes.ok) {
         const kakaoData = await kakaoRes.json();
+        debugInfo.kakaoCount = (kakaoData.documents || []).length;
         const seen = new Set();
         (kakaoData.documents || []).forEach(doc => {
           const name = doc.place_name || '';
@@ -51,7 +54,7 @@ module.exports = async (req, res) => {
           });
         });
       }
-    } catch (_) {}
+    } catch (e) { debugInfo.kakaoStatus = 'error:' + e.message; }
   }
 
   // ── 2: Overpass 철도역 (subway 아닌 railway=station) ──
@@ -104,5 +107,5 @@ module.exports = async (req, res) => {
     .sort((a, b) => a.distance - b.distance)
     .slice(0, 10);
 
-  res.status(200).json({ stations });
+  res.status(200).json({ stations, debug: debugInfo });
 };

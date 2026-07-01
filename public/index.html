@@ -538,37 +538,27 @@
     // NEIS 주소에서 괄호 안 구주소 제거 (예: "(침산동)")
     const cleanAddr = (address || '').replace(/\s*\([^)]*\)/g, '').trim();
 
-    // OSM은 도시 접두사 없는 이름으로 저장 ("대구침산초등학교" → "침산초등학교")
-    const CITY_PFXS = ['서울','부산','대구','인천','광주','대전','울산','세종',
-                       '경기','강원','충북','충남','전북','전남','경북','경남','제주'];
-    const osmName = CITY_PFXS.reduce(function(n, p) { return n.startsWith(p) ? n.slice(p.length) : n; }, schoolName);
+    // 1순위: 서버 지오코딩 (Kakao NEIS주소→POI 교차검증 → JUSO → Naver)
+    try {
+      var geocodeQs = new URLSearchParams({ address: cleanAddr || schoolName, name: schoolName });
+      var geoRes = await fetch('/api/geocode?' + geocodeQs);
+      var geoData = await geoRes.json();
+      if (geoData.result) {
+        lat = geoData.result.lat;
+        lon = geoData.result.lon;
+        console.log('[geocode] 서버 성공 (' + geoData.source + '):', lat, lon);
+      }
+    } catch (_) {}
 
-    // NEIS 주소에서 시/도 추출 (예: "대구광역시")
-    const cityMatch = cleanAddr.match(/^(\S+(?:특별시|광역시|특별자치시|특별자치도|도))/);
-    const cityArea = cityMatch ? cityMatch[1] : '';
-
-    // 1순위: Nominatim (지도 타일 = OSM과 동일 DB → 지도에 표시된 이름과 마커 정확히 일치)
-    // 시/도명 추가 쿼리로 전국 동명 학교 중 올바른 지역 선택
-    var nom = await nominatimFetch(osmName + (cityArea ? ' ' + cityArea : ''));
-    if (!nom) nom = await nominatimFetch(osmName);
-    if (!nom && osmName !== schoolName) nom = await nominatimFetch(schoolName);
-    if (nom) {
-      lat = nom.lat; lon = nom.lon;
-      console.log('[geocode] Nominatim(OSM) 성공:', lat, lon);
-    }
-
-    // 2순위: 서버 지오코딩 (Nominatim 실패 시 — Kakao 주소/POI)
+    // 2순위: Nominatim fallback — 반드시 NEIS 풀네임 사용 ("대구대산초등학교")
+    // 단축명("대산초등학교") 사용 시 다른 도시 학교를 잘못 가져오므로 절대 사용 안 함
     if (lat === null) {
-      try {
-        var geocodeQs = new URLSearchParams({ address: cleanAddr || schoolName, name: schoolName });
-        var geoRes = await fetch('/api/geocode?' + geocodeQs);
-        var geoData = await geoRes.json();
-        if (geoData.result) {
-          lat = geoData.result.lat;
-          lon = geoData.result.lon;
-          console.log('[geocode] 서버 성공 (' + geoData.source + '):', lat, lon);
-        }
-      } catch (_) {}
+      var nom = await nominatimFetch(schoolName + ' ' + cleanAddr.split(' ').slice(0, 2).join(' '));
+      if (!nom) nom = await nominatimFetch(schoolName);
+      if (nom) {
+        lat = nom.lat; lon = nom.lon;
+        console.log('[geocode] Nominatim 성공:', lat, lon);
+      }
     }
 
     if (lat === null) {
@@ -848,6 +838,7 @@
       if (r.ok) data = await r.json();
     } catch (_) {}
 
+    console.log('[subway] API 응답:', data);
     var stations = (data && data.stations) ? data.stations : [];
 
     if (!stations.length) {
