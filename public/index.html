@@ -538,27 +538,36 @@
     // NEIS 주소에서 괄호 안 구주소 제거 (예: "(침산동)")
     const cleanAddr = (address || '').replace(/\s*\([^)]*\)/g, '').trim();
 
-    // 1순위: 서버 지오코딩 (Kakao NEIS주소→POI 교차검증 → JUSO → Naver)
-    try {
-      var geocodeQs = new URLSearchParams({ address: cleanAddr || schoolName, name: schoolName });
-      var geoRes = await fetch('/api/geocode?' + geocodeQs);
-      var geoData = await geoRes.json();
-      if (geoData.result) {
-        lat = geoData.result.lat;
-        lon = geoData.result.lon;
-        console.log('[geocode] 서버 성공 (' + geoData.source + '):', lat, lon);
-      }
-    } catch (_) {}
+    // OSM은 도시 접두사 없는 이름으로 저장 ("대구침산초등학교" → "침산초등학교")
+    var _PFXS = ['서울','부산','대구','인천','광주','대전','울산','세종',
+                 '경기','강원','충북','충남','전북','전남','경북','경남','제주'];
+    var osmShortName = _PFXS.reduce(function(n,p){ return n.startsWith(p)?n.slice(p.length):n; }, schoolName);
+    // NEIS 주소 앞 2어절 = 시/도 + 구/군 (예: "대구광역시 북구") → OSM 검색 범위 한정용
+    var addrDistrict = cleanAddr.split(/\s+/).slice(0,2).join(' ');
 
-    // 2순위: Nominatim fallback — 반드시 NEIS 풀네임 사용 ("대구대산초등학교")
-    // 단축명("대산초등학교") 사용 시 다른 도시 학교를 잘못 가져오므로 절대 사용 안 함
+    // 1·2순위 병렬 실행: 서버 Kakao geocode + Nominatim(OSM 단축명+구)
+    // 병렬로 돌려 속도 확보, Nominatim은 단축명+행정구로 다른 도시 오매칭 방지
+    var _geocodeQs = new URLSearchParams({ address: cleanAddr || schoolName, name: schoolName });
+    var [serverCoord, nomCoord] = await Promise.all([
+      fetch('/api/geocode?' + _geocodeQs)
+        .then(function(r){ return r.json(); })
+        .then(function(d){ return d.result || null; })
+        .catch(function(){ return null; }),
+      nominatimFetch(osmShortName + ' ' + addrDistrict),
+    ]);
+
+    if (serverCoord) {
+      lat = serverCoord.lat; lon = serverCoord.lon;
+      console.log('[geocode] 서버:', serverCoord.source || '', lat, lon);
+    } else if (nomCoord) {
+      lat = nomCoord.lat; lon = nomCoord.lon;
+      console.log('[geocode] Nominatim(1):', lat, lon);
+    }
+
+    // 3순위: Nominatim 추가 쿼리 (도시명만으로 재시도)
     if (lat === null) {
-      var nom = await nominatimFetch(schoolName + ' ' + cleanAddr.split(' ').slice(0, 2).join(' '));
-      if (!nom) nom = await nominatimFetch(schoolName);
-      if (nom) {
-        lat = nom.lat; lon = nom.lon;
-        console.log('[geocode] Nominatim 성공:', lat, lon);
-      }
+      var nom2 = await nominatimFetch(osmShortName + ' ' + cleanAddr.split(/\s+/)[0]);
+      if (nom2) { lat = nom2.lat; lon = nom2.lon; console.log('[geocode] Nominatim(2):', lat, lon); }
     }
 
     if (lat === null) {
@@ -838,7 +847,6 @@
       if (r.ok) data = await r.json();
     } catch (_) {}
 
-    console.log('[subway] API 응답:', data);
     var stations = (data && data.stations) ? data.stations : [];
 
     if (!stations.length) {

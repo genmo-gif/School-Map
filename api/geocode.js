@@ -149,5 +149,30 @@ module.exports = async (req, res) => {
     } catch (_) {}
   }
 
+  // ── 최종 폴백: 서버사이드 Nominatim (OSM) ────────────
+  // Kakao/JUSO/Naver 모두 실패했을 때 API 키 없이도 동작
+  try {
+    const PFXS = ['서울','부산','대구','인천','광주','대전','울산','세종',
+                  '경기','강원','충북','충남','전북','전남','경북','경남','제주'];
+    const shortName = PFXS.reduce((n,p) => n.startsWith(p) ? n.slice(p.length) : n, searchName);
+    const district  = searchAddr.split(/\s+/).slice(0,2).join(' ');
+
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 5000);
+    const nomRes = await fetch(
+      'https://nominatim.openstreetmap.org/search?' +
+      new URLSearchParams({ q: shortName + ' ' + district, format: 'json', limit: '1', countrycodes: 'kr' }),
+      { headers: { 'User-Agent': 'DGESchoolApp/1.0', 'Accept-Language': 'ko' }, signal: ctrl.signal },
+    );
+    clearTimeout(timer);
+    const nomData = await nomRes.json();
+    if (nomData.length > 0) {
+      return res.status(200).json({
+        result: { lat: parseFloat(nomData[0].lat), lon: parseFloat(nomData[0].lon) },
+        source: 'nominatim',
+      });
+    }
+  } catch (_) {}
+
   res.status(200).json({ result: null, error: 'API 키 미설정 또는 주소 조회 실패' });
 };
