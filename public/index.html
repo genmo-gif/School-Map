@@ -556,25 +556,21 @@
     const seen = new Set();
     const queries = rawQueries.filter(q => { if (seen.has(q)) return false; seen.add(q); return true; });
 
-    // 1순위: 서버 지오코딩 (행정안전부/카카오/네이버 중 설정된 키 사용)
-    try {
-      const r = await fetch('/api/geocode?address=' + encodeURIComponent(cleanAddr || schoolName));
-      const d = await r.json();
-      if (d.result) { lat = d.result.lat; lon = d.result.lon; }
-    } catch (_) {}
+    // 1·2순위 병렬: 서버 지오코딩 + Nominatim 첫 쿼리 동시 실행
+    var [serverCoord, nomCoord] = await Promise.all([
+      fetch('/api/geocode?address=' + encodeURIComponent(cleanAddr || schoolName))
+        .then(function(r) { return r.json(); }).then(function(d) { return d.result || null; }).catch(function() { return null; }),
+      nominatimFetch(queries[0]),
+    ]);
 
-    // 2순위: Nominatim (API 키 없을 때 폴백)
+    if (serverCoord) { lat = serverCoord.lat; lon = serverCoord.lon; }
+    else if (nomCoord) { lat = nomCoord.lat; lon = nomCoord.lon; }
+
+    // Nominatim 추가 쿼리 (첫 병렬 시도 실패 시)
     if (lat === null) {
-      for (const q of queries) {
-        try {
-          const r = await fetch(
-            'https://nominatim.openstreetmap.org/search?q=' + encodeURIComponent(q) +
-            '&format=json&limit=1&countrycodes=kr',
-            { headers: { 'Accept-Language': 'ko', 'User-Agent': 'DGESchoolApp/1.0' } }
-          );
-          const d = await r.json();
-          if (d.length) { lat = parseFloat(d[0].lat); lon = parseFloat(d[0].lon); break; }
-        } catch (_) {}
+      for (var qi = 1; qi < queries.length; qi++) {
+        var r2 = await nominatimFetch(queries[qi]);
+        if (r2) { lat = r2.lat; lon = r2.lon; break; }
       }
     }
 
@@ -630,9 +626,12 @@
     }
 
     if (lat === null) {
+      console.error('[geocode] 모든 방법 실패 - 학교명:', schoolName, '주소:', address);
+      setHtml('station-list', '<div class="no-station">위치를 찾을 수 없습니다</div>');
       return;
     }
 
+    console.log('[geocode] 성공 lat:', lat, 'lon:', lon);
     map.setView([lat, lon], 16);
 
     const shortName = shortenSchoolName(schoolData.SCHUL_NM);
@@ -664,9 +663,10 @@
       )
       .openPopup();
 
-    await loadStations(lat, lon);
-    await new Promise(function(r) { setTimeout(r, 800); });
-    await loadNearbySchools(lat, lon, schoolData.SCHUL_KND_SC_NM || '', schoolData.SCHUL_NM);
+    await Promise.all([
+      loadStations(lat, lon),
+      loadNearbySchools(lat, lon, schoolData.SCHUL_KND_SC_NM || '', schoolData.SCHUL_NM),
+    ]);
   }
 
   // ── 학교명에서 학교 유형 추론 ──────────────────
@@ -679,20 +679,23 @@
     return '';
   }
 
-  // ── Overpass 공통 호출 (미러 자동 전환) ────────────
+  // ── Overpass 공통 호출 (미러 자동 전환 + 타임아웃) ──
   var OVERPASS_MIRRORS = [
     'https://overpass-api.de/api/interpreter',
     'https://overpass.kumi.systems/api/interpreter',
-    'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
   ];
   async function overpassFetch(query, onFirstElement) {
     for (var i = 0; i < OVERPASS_MIRRORS.length; i++) {
       try {
+        var ctrl = new AbortController();
+        var timer = setTimeout(function() { ctrl.abort(); }, 9000);
         var res = await fetch(OVERPASS_MIRRORS[i], {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: 'data=' + encodeURIComponent(query),
+          signal: ctrl.signal,
         });
+        clearTimeout(timer);
         if (!res.ok) continue;
         var d = await res.json();
         var el = (d.elements || [])[0];
@@ -701,6 +704,21 @@
       } catch (_) {}
     }
     return [];
+  }
+
+  async function nominatimFetch(q) {
+    try {
+      var ctrl = new AbortController();
+      var timer = setTimeout(function() { ctrl.abort(); }, 5000);
+      var r = await fetch(
+        'https://nominatim.openstreetmap.org/search?q=' + encodeURIComponent(q) +
+        '&format=json&limit=1&countrycodes=kr',
+        { headers: { 'Accept-Language': 'ko', 'User-Agent': 'DGESchoolApp/1.0' }, signal: ctrl.signal }
+      );
+      clearTimeout(timer);
+      var d = await r.json();
+      return d.length ? { lat: parseFloat(d[0].lat), lon: parseFloat(d[0].lon) } : null;
+    } catch (_) { return null; }
   }
 
   // ── 거리 계산 (m) ───────────────────────────────
@@ -828,9 +846,10 @@
       }),
     }).addTo(map).bindPopup('<b>' + esc(s.name) + '</b>').openPopup();
 
-    await loadStations(s.lat, s.lon);
-    await new Promise(function(r) { setTimeout(r, 800); });
-    await loadNearbySchools(s.lat, s.lon, inferSchoolType(s.name), s.name);
+    await Promise.all([
+      loadStations(s.lat, s.lon),
+      loadNearbySchools(s.lat, s.lon, inferSchoolType(s.name), s.name),
+    ]);
 
     // 백그라운드에서 NEIS 상세 정보 로드
     try {
