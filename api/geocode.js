@@ -149,19 +149,32 @@ module.exports = async (req, res) => {
     } catch (_) {}
   }
 
-  // ── 최종 폴백: 서버사이드 Nominatim (OSM) ────────────
-  // Kakao/JUSO/Naver 모두 실패했을 때 API 키 없이도 동작
+  // ── 최종 폴백: 서버사이드 Nominatim + 도시 viewbox ──────
   try {
     const PFXS = ['서울','부산','대구','인천','광주','대전','울산','세종',
                   '경기','강원','충북','충남','전북','전남','경북','경남','제주'];
     const shortName = PFXS.reduce((n,p) => n.startsWith(p) ? n.slice(p.length) : n, searchName);
-    const district  = searchAddr.split(/\s+/).slice(0,2).join(' ');
+
+    // 광역시/도별 bounding box (lon_min,lat_max,lon_max,lat_min)
+    const VIEWBOXES = {
+      '서울특별시':'126.7,37.7,127.3,37.4','부산광역시':'128.7,35.4,129.3,34.9',
+      '대구광역시':'128.3,36.2,129.0,35.6','인천광역시':'126.4,37.8,126.9,37.2',
+      '광주광역시':'126.7,35.3,127.0,34.9','대전광역시':'127.2,36.5,127.6,36.2',
+      '울산광역시':'129.0,35.7,129.5,35.3','세종특별자치시':'127.2,36.6,127.5,36.4',
+      '경기도':'126.7,38.0,127.9,36.9','강원도':'127.5,38.7,129.4,37.0',
+      '충청북도':'127.3,37.2,128.5,36.2','충청남도':'126.3,37.0,127.5,36.0',
+      '전라북도':'126.4,35.9,127.9,35.3','전라남도':'125.9,35.0,127.5,34.2',
+      '경상북도':'128.3,37.2,129.6,35.9','경상남도':'127.6,35.7,129.3,34.7',
+      '제주특별자치도':'126.1,33.6,126.9,33.1',
+    };
+    const cityKey = Object.keys(VIEWBOXES).find(k => searchAddr.startsWith(k)) || '';
+    const params = { q: shortName, format: 'json', limit: '1', countrycodes: 'kr' };
+    if (cityKey) { params.viewbox = VIEWBOXES[cityKey]; params.bounded = '1'; }
 
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 5000);
     const nomRes = await fetch(
-      'https://nominatim.openstreetmap.org/search?' +
-      new URLSearchParams({ q: shortName + ' ' + district, format: 'json', limit: '1', countrycodes: 'kr' }),
+      'https://nominatim.openstreetmap.org/search?' + new URLSearchParams(params),
       { headers: { 'User-Agent': 'DGESchoolApp/1.0', 'Accept-Language': 'ko' }, signal: ctrl.signal },
     );
     clearTimeout(timer);

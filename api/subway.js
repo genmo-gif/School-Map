@@ -100,6 +100,38 @@ module.exports = async (req, res) => {
     } catch (_) {}
   }
 
+  // ── 3: Kakao·Overpass 모두 실패 시 Nominatim으로 역 검색 ──
+  if (subwayStations.length === 0 && railwayStations.length === 0) {
+    try {
+      const dlat = r / 111000, dlon = r / (111000 * Math.cos(parseFloat(lat) * Math.PI / 180));
+      const vb = `${parseFloat(lon)-dlon},${parseFloat(lat)+dlat},${parseFloat(lon)+dlon},${parseFloat(lat)-dlat}`;
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 6000);
+      const nomRes = await fetch(
+        'https://nominatim.openstreetmap.org/search?' +
+        new URLSearchParams({ q: '역', format: 'json', limit: '20', viewbox: vb, bounded: '1', countrycodes: 'kr' }),
+        { headers: { 'User-Agent': 'DGESchoolApp/1.0', 'Accept-Language': 'ko' }, signal: ctrl.signal },
+      );
+      clearTimeout(timer);
+      const nomData = await nomRes.json();
+      const seen = new Set();
+      nomData.forEach(item => {
+        const name = item.name || item.display_name?.split(',')[0] || '';
+        if (!name || seen.has(name)) return;
+        if (!/역$/.test(name)) return;
+        seen.add(name);
+        const sLat = parseFloat(item.lat), sLon = parseFloat(item.lon);
+        const isSubway = (item.type === 'station' && item.class === 'railway') || name.includes('지하철');
+        const dist = haversine(parseFloat(lat), parseFloat(lon), sLat, sLon);
+        (isSubway ? subwayStations : railwayStations).push({
+          name, lat: sLat, lon: sLon,
+          type: isSubway ? 'subway' : 'railway',
+          distance: dist,
+        });
+      });
+    } catch (_) {}
+  }
+
   const stations = [...subwayStations, ...railwayStations]
     .sort((a, b) => a.distance - b.distance)
     .slice(0, 10);

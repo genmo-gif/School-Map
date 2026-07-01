@@ -538,36 +538,15 @@
     // NEIS 주소에서 괄호 안 구주소 제거 (예: "(침산동)")
     const cleanAddr = (address || '').replace(/\s*\([^)]*\)/g, '').trim();
 
-    // OSM은 도시 접두사 없는 이름으로 저장 ("대구침산초등학교" → "침산초등학교")
-    var _PFXS = ['서울','부산','대구','인천','광주','대전','울산','세종',
-                 '경기','강원','충북','충남','전북','전남','경북','경남','제주'];
-    var osmShortName = _PFXS.reduce(function(n,p){ return n.startsWith(p)?n.slice(p.length):n; }, schoolName);
-    // NEIS 주소 앞 2어절 = 시/도 + 구/군 (예: "대구광역시 북구") → OSM 검색 범위 한정용
-    var addrDistrict = cleanAddr.split(/\s+/).slice(0,2).join(' ');
-
-    // 1·2순위 병렬 실행: 서버 Kakao geocode + Nominatim(OSM 단축명+구)
-    // 병렬로 돌려 속도 확보, Nominatim은 단축명+행정구로 다른 도시 오매칭 방지
+    // 1순위: 서버 /api/geocode (Kakao → JUSO → Naver → Nominatim viewbox 순)
     var _geocodeQs = new URLSearchParams({ address: cleanAddr || schoolName, name: schoolName });
-    var [serverCoord, nomCoord] = await Promise.all([
-      fetch('/api/geocode?' + _geocodeQs)
-        .then(function(r){ return r.json(); })
-        .then(function(d){ return d.result || null; })
-        .catch(function(){ return null; }),
-      nominatimFetch(osmShortName + ' ' + addrDistrict),
-    ]);
+    var serverCoord = await fetch('/api/geocode?' + _geocodeQs)
+      .then(function(r){ return r.json(); })
+      .then(function(d){ return d.result || null; })
+      .catch(function(){ return null; });
 
     if (serverCoord) {
       lat = serverCoord.lat; lon = serverCoord.lon;
-      console.log('[geocode] 서버:', serverCoord.source || '', lat, lon);
-    } else if (nomCoord) {
-      lat = nomCoord.lat; lon = nomCoord.lon;
-      console.log('[geocode] Nominatim(1):', lat, lon);
-    }
-
-    // 3순위: Nominatim 추가 쿼리 (도시명만으로 재시도)
-    if (lat === null) {
-      var nom2 = await nominatimFetch(osmShortName + ' ' + cleanAddr.split(/\s+/)[0]);
-      if (nom2) { lat = nom2.lat; lon = nom2.lon; console.log('[geocode] Nominatim(2):', lat, lon); }
     }
 
     if (lat === null) {
