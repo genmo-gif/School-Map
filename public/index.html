@@ -611,7 +611,7 @@
         var slat = parseFloat(el.lat ?? el.center?.lat);
         var slon = parseFloat(el.lon ?? el.center?.lon);
         if (!Number.isNaN(slat) && !Number.isNaN(slon)) { lat = slat; lon = slon; }
-      });
+      }, 8000);
     }
 
     // 좌표가 여전히 없거나 snap 실패 → 전국 검색
@@ -622,7 +622,7 @@
       await overpassFetch(natQ, function(el) {
         lat = parseFloat(el.lat ?? el.center?.lat);
         lon = parseFloat(el.lon ?? el.center?.lon);
-      });
+      }, 8000);
     }
 
     if (lat === null) {
@@ -684,11 +684,12 @@
     'https://overpass-api.de/api/interpreter',
     'https://overpass.kumi.systems/api/interpreter',
   ];
-  async function overpassFetch(query, onFirstElement) {
+  async function overpassFetch(query, onFirstElement, timeoutMs) {
+    var ms = timeoutMs || 10000;
     for (var i = 0; i < OVERPASS_MIRRORS.length; i++) {
       try {
         let ctrl = new AbortController();
-        let timer = setTimeout(function() { ctrl.abort(); }, 9000);
+        let timer = setTimeout(function() { ctrl.abort(); }, ms);
         var res = await fetch(OVERPASS_MIRRORS[i], {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -737,19 +738,21 @@
 
     const isKindergarten = (schoolType || '').includes('유치');
     const amenity = isKindergarten ? 'kindergarten' : 'school';
+    // bbox가 around:보다 Overpass에서 훨씬 빠름 (공간 인덱스 직접 사용)
+    const dlat = 0.045, dlon = 0.06;
+    const bbox = (lat - dlat) + ',' + (lon - dlon) + ',' + (lat + dlat) + ',' + (lon + dlon);
     const query = [
-      '[out:json][timeout:10];',
+      '[out:json][timeout:12];',
       '(',
-      `  node["amenity"="${amenity}"](around:5000,${lat},${lon});`,
-      `  way["amenity"="${amenity}"](around:5000,${lat},${lon});`,
+      `  node["amenity"="${amenity}"](${bbox});`,
+      `  way["amenity"="${amenity}"](${bbox});`,
       ');',
-      'out center 60;',
+      'out center 80;',
     ].join('\n');
 
-    var elements = await overpassFetch(query, null);
+    var elements = await overpassFetch(query, null, 13000);
+    console.log('[nearby] Overpass returned', elements.length, 'elements for amenity:', amenity);
 
-    const TYPE_KW = { '초등학교':'초등','중학교':'중학','고등학교':'고등','유치원':'유치','특수학교':'특수' };
-    const filterKw = (Object.entries(TYPE_KW).find(([k]) => (schoolType||'').includes(k)) || [])[1] || null;
     const searchedShort = searchedName ? shortenSchoolName(searchedName) : '';
     const seenNames = new Set();
 
@@ -760,8 +763,9 @@
         if (!eLat || !eLon) return null;
         const name = el.tags?.['name:ko'] || el.tags?.name || '';
         if (!name) return null;
-        if (filterKw && !name.includes(filterKw)) return null;
-        return { name, lat: eLat, lon: eLon, distance: calcDist(lat, lon, eLat, eLon) };
+        const dist = calcDist(lat, lon, eLat, eLon);
+        if (dist > 5000) return null;
+        return { name, lat: eLat, lon: eLon, distance: dist };
       })
       .filter(Boolean)
       .sort(function(a, b) { return a.distance - b.distance; })
@@ -877,7 +881,7 @@
   // ── 역 (지하철 파란색, 철도 보라색) ────────────────
   async function loadStations(lat, lon) {
     const query = [
-      '[out:json][timeout:8];',
+      '[out:json][timeout:10];',
       '(',
       `  node["railway"="station"](around:1000,${lat},${lon});`,
       `  node["railway"="halt"](around:1000,${lat},${lon});`,
