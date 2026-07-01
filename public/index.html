@@ -747,40 +747,52 @@
     return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
   }
 
-  // ── 반경 5km 학교 — 브라우저에서 Overpass 직접 호출 ──
+  // ── 반경 5km 학교 — Nominatim amenity 검색 (Overpass보다 안정적)
   async function loadNearbySchools(lat, lon, schoolType, searchedName) {
     clearNearbySchoolMarkers();
 
     const isKindergarten = (schoolType || '').includes('유치');
     const amenity = isKindergarten ? 'kindergarten' : 'school';
-    // bbox가 around:보다 Overpass에서 훨씬 빠름 (공간 인덱스 직접 사용)
     const dlat = 0.045, dlon = 0.06;
-    const bbox = (lat - dlat) + ',' + (lon - dlon) + ',' + (lat + dlat) + ',' + (lon + dlon);
-    const query = [
-      '[out:json][timeout:12];',
-      '(',
-      `  node["amenity"="${amenity}"](${bbox});`,
-      `  way["amenity"="${amenity}"](${bbox});`,
-      ');',
-      'out center 80;',
-    ].join('\n');
+    // Nominatim viewbox: left,top,right,bottom = minLon,maxLat,maxLon,minLat
+    const viewbox = (lon - dlon) + ',' + (lat + dlat) + ',' + (lon + dlon) + ',' + (lat - dlat);
+    const url = 'https://nominatim.openstreetmap.org/search?' + new URLSearchParams({
+      amenity: amenity,
+      format: 'json',
+      limit: '50',
+      viewbox: viewbox,
+      bounded: '1',
+      countrycodes: 'kr',
+      'accept-language': 'ko',
+    });
 
-    var elements = await overpassFetch(query, null, 13000);
-    console.log('[nearby] Overpass returned', elements.length, 'elements for amenity:', amenity);
+    var items = [];
+    try {
+      let ctrl = new AbortController();
+      let timer = setTimeout(function() { ctrl.abort(); }, 8000);
+      var res = await fetch(url, {
+        headers: { 'User-Agent': 'DGESchoolApp/1.0', 'Accept-Language': 'ko' },
+        signal: ctrl.signal,
+      });
+      clearTimeout(timer);
+      if (res.ok) items = await res.json();
+    } catch (_) {}
+
+    console.log('[nearby] Nominatim returned', items.length, 'schools');
 
     const searchedShort = searchedName ? shortenSchoolName(searchedName) : '';
     const seenNames = new Set();
 
-    elements
-      .map(function(el) {
-        const eLat = el.lat ?? el.center?.lat;
-        const eLon = el.lon ?? el.center?.lon;
-        if (!eLat || !eLon) return null;
-        const name = el.tags?.['name:ko'] || el.tags?.name || '';
+    items
+      .map(function(item) {
+        const sLat = parseFloat(item.lat);
+        const sLon = parseFloat(item.lon);
+        if (isNaN(sLat) || isNaN(sLon)) return null;
+        const name = (item.display_name || '').split(',')[0].trim();
         if (!name) return null;
-        const dist = calcDist(lat, lon, eLat, eLon);
+        const dist = calcDist(lat, lon, sLat, sLon);
         if (dist > 5000) return null;
-        return { name, lat: eLat, lon: eLon, distance: dist };
+        return { name: name, lat: sLat, lon: sLon, distance: dist };
       })
       .filter(Boolean)
       .sort(function(a, b) { return a.distance - b.distance; })
@@ -793,7 +805,7 @@
         const shortName = shortenSchoolName(s.name);
         if (searchedShort && shortName === searchedShort) return;
 
-        const distTxt = s.distance < 1000 ? s.distance + 'm' : (s.distance/1000).toFixed(1) + 'km';
+        const distTxt = s.distance < 1000 ? s.distance + 'm' : (s.distance / 1000).toFixed(1) + 'km';
         const icon = L.divIcon({
           className: '',
           html:
