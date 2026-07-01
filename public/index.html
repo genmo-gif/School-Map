@@ -604,7 +604,7 @@
     if (lat !== null) {
       var b = 0.15;
       var bbox = (lat - b) + ',' + (lon - b) + ',' + (lat + b) + ',' + (lon + b);
-      var snapQ = ['[out:json][timeout:20];(']
+      var snapQ = ['[out:json][timeout:8];(']
         .concat(buildNameLines(variants, amenity, bbox))
         .concat([');', 'out center 1;']).join('\n');
       await overpassFetch(snapQ, function(el) {
@@ -616,7 +616,7 @@
 
     // 좌표가 여전히 없거나 snap 실패 → 전국 검색
     if (lat === null) {
-      var natQ = ['[out:json][timeout:25];(']
+      var natQ = ['[out:json][timeout:8];(']
         .concat(buildNameLines(variants, amenity, '33,124,39,132'))
         .concat([');', 'out center 1;']).join('\n');
       await overpassFetch(natQ, function(el) {
@@ -687,8 +687,8 @@
   async function overpassFetch(query, onFirstElement) {
     for (var i = 0; i < OVERPASS_MIRRORS.length; i++) {
       try {
-        var ctrl = new AbortController();
-        var timer = setTimeout(function() { ctrl.abort(); }, 9000);
+        let ctrl = new AbortController();
+        let timer = setTimeout(function() { ctrl.abort(); }, 9000);
         var res = await fetch(OVERPASS_MIRRORS[i], {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -738,12 +738,12 @@
     const isKindergarten = (schoolType || '').includes('유치');
     const amenity = isKindergarten ? 'kindergarten' : 'school';
     const query = [
-      '[out:json][timeout:30];',
+      '[out:json][timeout:10];',
       '(',
       `  node["amenity"="${amenity}"](around:5000,${lat},${lon});`,
       `  way["amenity"="${amenity}"](around:5000,${lat},${lon});`,
       ');',
-      'out center;',
+      'out center 60;',
     ].join('\n');
 
     var elements = await overpassFetch(query, null);
@@ -877,7 +877,7 @@
   // ── 역 (지하철 파란색, 철도 보라색) ────────────────
   async function loadStations(lat, lon) {
     const query = [
-      '[out:json][timeout:20];',
+      '[out:json][timeout:8];',
       '(',
       `  node["railway"="station"](around:1000,${lat},${lon});`,
       `  node["railway"="halt"](around:1000,${lat},${lon});`,
