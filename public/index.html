@@ -366,6 +366,7 @@
   }).addTo(map);
 
   let schoolMarker        = null;
+  let radiusCircle        = null;
   let stationMarkers      = [];
   let nearbySchoolMarkers = [];
   let lastResults         = [];
@@ -421,6 +422,9 @@
     nearbySchoolMarkers.forEach(m => map.removeLayer(m));
     nearbySchoolMarkers = [];
   }
+  function clearRadiusCircle() {
+    if (radiusCircle) { map.removeLayer(radiusCircle); radiusCircle = null; }
+  }
 
   // ── 검색 ────────────────────────────────────────
   async function doSearch() {
@@ -430,6 +434,7 @@
     infoPanel.classList.remove('show');
     clearStationMarkers();
     clearNearbySchoolMarkers();
+    clearRadiusCircle();
     if (schoolMarker) { map.removeLayer(schoolMarker); schoolMarker = null; }
     selectedCard = null;
 
@@ -663,6 +668,16 @@
       )
       .openPopup();
 
+    clearRadiusCircle();
+    radiusCircle = L.circle([lat, lon], {
+      radius: 1000,
+      color: '#ef4444',
+      fillColor: '#ef4444',
+      fillOpacity: 0.07,
+      weight: 2.5,
+      dashArray: '8 5',
+    }).addTo(map);
+
     await Promise.all([
       loadStations(lat, lon),
       loadNearbySchools(lat, lon, schoolData.SCHUL_KND_SC_NM || '', schoolData.SCHUL_NM),
@@ -825,6 +840,7 @@
 
     clearStationMarkers();
     clearNearbySchoolMarkers();
+    clearRadiusCircle();
     if (schoolMarker) { map.removeLayer(schoolMarker); schoolMarker = null; }
 
     map.setView([s.lat, s.lon], 16);
@@ -849,6 +865,15 @@
         iconAnchor: [0, 44],
       }),
     }).addTo(map).bindPopup('<b>' + esc(s.name) + '</b>').openPopup();
+
+    radiusCircle = L.circle([s.lat, s.lon], {
+      radius: 1000,
+      color: '#ef4444',
+      fillColor: '#ef4444',
+      fillOpacity: 0.07,
+      weight: 2.5,
+      dashArray: '8 5',
+    }).addTo(map);
 
     await Promise.all([
       loadStations(s.lat, s.lon),
@@ -943,6 +968,7 @@
     infoPanel.classList.remove('show');
     clearStationMarkers();
     clearNearbySchoolMarkers();
+    clearRadiusCircle();
     if (schoolMarker) { map.removeLayer(schoolMarker); schoolMarker = null; }
     if (selectedCard) { selectedCard.classList.remove('selected'); selectedCard = null; }
   });
