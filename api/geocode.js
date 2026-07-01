@@ -19,7 +19,34 @@ module.exports = async (req, res) => {
   if (KAKAO_KEY) {
     const kakaoHeaders = { Authorization: 'KakaoAK ' + KAKAO_KEY };
 
-    // ── 1순위: 카카오 주소 검색 (NEIS 도로명주소 → 건물좌표, 가장 정확) ──
+    // 학교명 앞 도시 접두사 추출 (예: "대구침산초등학교" → "대구")
+    const CITY_PREFIXES = ['서울','부산','대구','인천','광주','대전','울산','세종',
+                           '경기','강원','충북','충남','전북','전남','경북','경남','제주'];
+    const expectedCity = CITY_PREFIXES.find(c => searchName.startsWith(c)) || '';
+
+    // ── 1순위: 카카오 키워드 검색 (학교 POI 직접 조회 — 건물 좌표 정확) ──
+    // size=5 로 후보를 여러 개 받아 도시가 맞는 첫 번째 결과를 선택
+    // (다른 도시의 동명 학교와 오매칭 방지)
+    try {
+      const kwRes = await fetch(
+        'https://dapi.kakao.com/v2/local/search/keyword.json?' +
+        new URLSearchParams({ query: searchName, size: '5', category_group_code: 'SC4' }),
+        { headers: kakaoHeaders },
+      );
+      const kwData = await kwRes.json();
+      const docs = kwData?.documents || [];
+      const doc = expectedCity
+        ? docs.find(d => (d.address_name || d.road_address_name || '').includes(expectedCity))
+        : docs[0];
+      if (doc) {
+        return res.status(200).json({
+          result: { lat: parseFloat(doc.y), lon: parseFloat(doc.x) },
+          source: 'kakao-keyword',
+        });
+      }
+    } catch (_) {}
+
+    // ── 2순위: 카카오 주소 검색 (NEIS 도로명주소 → 건물좌표) ──
     try {
       const addrRes = await fetch(
         'https://dapi.kakao.com/v2/local/search/address.json?' +
@@ -33,23 +60,6 @@ module.exports = async (req, res) => {
         return res.status(200).json({
           result: { lat: parseFloat(doc.y), lon: parseFloat(doc.x) },
           source: 'kakao-address',
-        });
-      }
-    } catch (_) {}
-
-    // ── 2순위: 카카오 키워드 검색 (학교 POI — 주소 검색 실패 시 보조) ──
-    try {
-      const kwRes = await fetch(
-        'https://dapi.kakao.com/v2/local/search/keyword.json?' +
-        new URLSearchParams({ query: searchName, size: '1', category_group_code: 'SC4' }),
-        { headers: kakaoHeaders },
-      );
-      const kwData = await kwRes.json();
-      const doc = kwData?.documents?.[0];
-      if (doc) {
-        return res.status(200).json({
-          result: { lat: parseFloat(doc.y), lon: parseFloat(doc.x) },
-          source: 'kakao-keyword',
         });
       }
     } catch (_) {}
