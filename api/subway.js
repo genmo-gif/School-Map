@@ -29,7 +29,7 @@ module.exports = async (req, res) => {
   const r = Math.min(parseInt(radius, 10) || 3000, 5000);
 
   const query = [
-    '[out:json][timeout:20];',
+    '[out:json][timeout:8];',
     '(',
     `  node["railway"="station"](around:${r},${lat},${lon});`,
     `  node["railway"="halt"](around:${r},${lat},${lon});`,
@@ -46,13 +46,17 @@ module.exports = async (req, res) => {
   let data = null;
   for (const endpoint of OVERPASS_MIRRORS) {
     try {
-      const r = await fetch(endpoint, {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 9000);
+      const resp = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: `data=${encodeURIComponent(query)}`,
+        signal: ctrl.signal,
       });
-      if (!r.ok) continue;
-      data = await r.json();
+      clearTimeout(timer);
+      if (!resp.ok) continue;
+      data = await resp.json();
       break;
     } catch (_) {}
   }

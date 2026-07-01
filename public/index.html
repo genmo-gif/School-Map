@@ -535,121 +535,38 @@
 
     let lat = null, lon = null;
 
-    // NEIS 주소에서 괄호 안 구주소 제거 (예: "(침산동)", "(침산동, 칠성초등학교)")
+    // NEIS 주소에서 괄호 안 구주소 제거 (예: "(침산동)")
     const cleanAddr = (address || '').replace(/\s*\([^)]*\)/g, '').trim();
 
-    // 건물번호 제거 버전 (예: "침산남로32길 17" → "침산남로32길")
-    const addrNoNum = cleanAddr.replace(/\s+\d+(?:-\d+)?$/, '').trim();
-
-    // 골목길(X로N길)에서 메인 도로 추출 (예: "침산남로32길" → "침산남로")
-    const addrMainRoad = addrNoNum.replace(/(\S+(?:대로|로))\d+길/, '$1').trim();
-
-    // 시/도 추출 (예: "대구광역시")
-    const cityMatch = cleanAddr.match(/^(\S+(?:특별시|광역시|특별자치시|특별자치도|도))\s/);
-    const city = cityMatch ? cityMatch[1] : '';
-
-    const rawQueries = [
-      cleanAddr,
-      addrNoNum !== cleanAddr ? addrNoNum : '',
-      addrMainRoad !== addrNoNum ? addrMainRoad : '',
-      schoolName + (cleanAddr ? ' ' + cleanAddr : ''),
-      city ? schoolName + ' ' + city : '',
-      schoolName,
-    ].filter(Boolean);
-
-    // 중복 제거
-    const seen = new Set();
-    const queries = rawQueries.filter(q => { if (seen.has(q)) return false; seen.add(q); return true; });
-
-    // 1·2순위 병렬: 서버 지오코딩 + Nominatim 첫 쿼리 동시 실행
-    var geocodeQs = new URLSearchParams({ address: cleanAddr || schoolName, name: schoolName });
-    var [serverCoord, nomCoord] = await Promise.all([
-      fetch('/api/geocode?' + geocodeQs)
-        .then(function(r) { return r.json(); }).then(function(d) { return d.result || null; }).catch(function() { return null; }),
-      nominatimFetch(queries[0]),
-    ]);
-
-    if (serverCoord && nomCoord) {
-      // 두 좌표가 500m 이상 차이나면 NEIS 도로명주소 기반 Nominatim을 신뢰
-      const coordGap = calcDist(serverCoord.lat, serverCoord.lon, nomCoord.lat, nomCoord.lon);
-      if (coordGap > 500) {
-        console.warn('[geocode] 카카오↔Nominatim 차이 ' + Math.round(coordGap) + 'm → Nominatim 우선');
-        lat = nomCoord.lat; lon = nomCoord.lon;
-      } else {
-        lat = serverCoord.lat; lon = serverCoord.lon;
+    // 1순위: 서버 지오코딩 (Kakao 주소→건물좌표 → Kakao 키워드 → JUSO → Naver)
+    try {
+      var geocodeQs = new URLSearchParams({ address: cleanAddr || schoolName, name: schoolName });
+      var geoRes = await fetch('/api/geocode?' + geocodeQs);
+      var geoData = await geoRes.json();
+      if (geoData.result) {
+        lat = geoData.result.lat;
+        lon = geoData.result.lon;
+        console.log('[geocode] 서버 성공 (' + geoData.source + '):', lat, lon);
       }
-    } else if (serverCoord) {
-      lat = serverCoord.lat; lon = serverCoord.lon;
-    } else if (nomCoord) {
-      lat = nomCoord.lat; lon = nomCoord.lon;
-    }
+    } catch (_) {}
 
-    // Nominatim 추가 쿼리 (첫 병렬 시도 실패 시)
+    // 2순위: Nominatim (서버 실패 시)
     if (lat === null) {
-      for (var qi = 1; qi < queries.length; qi++) {
-        var r2 = await nominatimFetch(queries[qi]);
-        if (r2) { lat = r2.lat; lon = r2.lon; break; }
+      var nom = await nominatimFetch(cleanAddr || schoolName);
+      if (!nom) nom = await nominatimFetch(schoolName);
+      if (nom) {
+        lat = nom.lat; lon = nom.lon;
+        console.log('[geocode] Nominatim 사용:', lat, lon);
       }
     }
 
-    // OSM 학교 POI로 좌표 보정 (NEIS명 "대구칠성초" → OSM명 "칠성초" 불일치 처리)
-    const amenity = (schoolData.SCHUL_KND_SC_NM || '').includes('유치') ? 'kindergarten' : 'school';
-
-    // NEIS 학교명에서 도시 접두사를 제거한 변형 생성 ("대구칠성초등학교" → "칠성초등학교")
-    function osmNameVariants(name) {
-      var prefixes = ['서울','부산','대구','인천','광주','대전','울산','세종',
-                      '경기','강원','충북','충남','전북','전남','경북','경남','제주'];
-      for (var pi = 0; pi < prefixes.length; pi++) {
-        if (name.startsWith(prefixes[pi])) return [name, name.slice(prefixes[pi].length)];
-      }
-      return [name];
-    }
-
-    function buildNameLines(variants, amenityType, areaExpr) {
-      var lines = [];
-      variants.forEach(function(v) {
-        lines.push('  node["amenity"="' + amenityType + '"]["name"="' + v + '"](' + areaExpr + ');');
-        lines.push('  way["amenity"="' + amenityType + '"]["name"="' + v + '"](' + areaExpr + ');');
-        lines.push('  node["amenity"="' + amenityType + '"]["name:ko"="' + v + '"](' + areaExpr + ');');
-        lines.push('  way["amenity"="' + amenityType + '"]["name:ko"="' + v + '"](' + areaExpr + ');');
-      });
-      return lines;
-    }
-
-    var variants = osmNameVariants(schoolName);
-
-    // bbox 보정 (Nominatim 좌표가 있으면 0.15° 반경, 없으면 전국)
-    if (lat !== null) {
-      var b = 0.15;
-      var bbox = (lat - b) + ',' + (lon - b) + ',' + (lat + b) + ',' + (lon + b);
-      var snapQ = ['[out:json][timeout:8];(']
-        .concat(buildNameLines(variants, amenity, bbox))
-        .concat([');', 'out center 1;']).join('\n');
-      await overpassFetch(snapQ, function(el) {
-        var slat = parseFloat(el.lat ?? el.center?.lat);
-        var slon = parseFloat(el.lon ?? el.center?.lon);
-        if (!Number.isNaN(slat) && !Number.isNaN(slon)) { lat = slat; lon = slon; }
-      }, 8000);
-    }
-
-    // 좌표가 여전히 없거나 snap 실패 → 전국 검색
     if (lat === null) {
-      var natQ = ['[out:json][timeout:8];(']
-        .concat(buildNameLines(variants, amenity, '33,124,39,132'))
-        .concat([');', 'out center 1;']).join('\n');
-      await overpassFetch(natQ, function(el) {
-        lat = parseFloat(el.lat ?? el.center?.lat);
-        lon = parseFloat(el.lon ?? el.center?.lon);
-      }, 8000);
-    }
-
-    if (lat === null) {
-      console.error('[geocode] 모든 방법 실패 - 학교명:', schoolName, '주소:', address);
+      console.error('[geocode] 모든 방법 실패:', schoolName, address);
       setHtml('station-list', '<div class="no-station">위치를 찾을 수 없습니다</div>');
       return;
     }
 
-    console.log('[geocode] 성공 lat:', lat, 'lon:', lon);
+    console.log('[geocode] 최종 lat:', lat, 'lon:', lon);
     map.setView([lat, lon], 16);
 
     const shortName = shortenSchoolName(schoolData.SCHUL_NM);
@@ -705,34 +622,6 @@
     if (name.includes('유치')) return '유치원';
     if (name.includes('특수')) return '특수학교';
     return '';
-  }
-
-  // ── Overpass 공통 호출 (미러 자동 전환 + 타임아웃) ──
-  var OVERPASS_MIRRORS = [
-    'https://overpass-api.de/api/interpreter',
-    'https://overpass.kumi.systems/api/interpreter',
-  ];
-  async function overpassFetch(query, onFirstElement, timeoutMs) {
-    var ms = timeoutMs || 10000;
-    for (var i = 0; i < OVERPASS_MIRRORS.length; i++) {
-      try {
-        let ctrl = new AbortController();
-        let timer = setTimeout(function() { ctrl.abort(); }, ms);
-        var res = await fetch(OVERPASS_MIRRORS[i], {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: 'data=' + encodeURIComponent(query),
-          signal: ctrl.signal,
-        });
-        clearTimeout(timer);
-        if (!res.ok) continue;
-        var d = await res.json();
-        var el = (d.elements || [])[0];
-        if (el && onFirstElement) onFirstElement(el);
-        return d.elements || [];
-      } catch (_) {}
-    }
-    return [];
   }
 
   async function nominatimFetch(q) {
