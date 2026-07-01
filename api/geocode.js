@@ -5,6 +5,15 @@ const KAKAO_KEY = process.env.KAKAO_REST_API_KEY;
 const NAVER_ID  = process.env.NAVER_CLIENT_ID;
 const NAVER_SEC = process.env.NAVER_CLIENT_SECRET;
 
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const φ1 = (lat1 * Math.PI) / 180, φ2 = (lat2 * Math.PI) / 180;
+  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+  const a = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
+  return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+}
+
 module.exports = async (req, res) => {
   const { address, name } = req.query;
   if (!address && !name) {
@@ -19,50 +28,58 @@ module.exports = async (req, res) => {
   if (KAKAO_KEY) {
     const kakaoHeaders = { Authorization: 'KakaoAK ' + KAKAO_KEY };
 
-    // 학교명 앞 도시 접두사 추출 (예: "대구침산초등학교" → "대구")
-    const CITY_PREFIXES = ['서울','부산','대구','인천','광주','대전','울산','세종',
-                           '경기','강원','충북','충남','전북','전남','경북','경남','제주'];
-    const expectedCity = CITY_PREFIXES.find(c => searchName.startsWith(c)) || '';
+    // Kakao 키워드 검색과 주소 검색을 동시에 실행해 교차검증
+    let kwDoc = null;
+    let addrDoc = null;
 
-    // ── 1순위: 카카오 키워드 검색 (학교 POI 직접 조회 — 건물 좌표 정확) ──
-    // size=5 로 후보를 여러 개 받아 도시가 맞는 첫 번째 결과를 선택
-    // (다른 도시의 동명 학교와 오매칭 방지)
-    try {
-      const kwRes = await fetch(
+    await Promise.all([
+      // 키워드 검색: SC4(학교) 카테고리, 후보 5개
+      fetch(
         'https://dapi.kakao.com/v2/local/search/keyword.json?' +
         new URLSearchParams({ query: searchName, size: '5', category_group_code: 'SC4' }),
         { headers: kakaoHeaders },
-      );
-      const kwData = await kwRes.json();
-      const docs = kwData?.documents || [];
-      const doc = expectedCity
-        ? docs.find(d => (d.address_name || d.road_address_name || '').includes(expectedCity))
-        : docs[0];
-      if (doc) {
-        return res.status(200).json({
-          result: { lat: parseFloat(doc.y), lon: parseFloat(doc.x) },
-          source: 'kakao-keyword',
-        });
-      }
-    } catch (_) {}
+      ).then(r => r.json()).then(d => { kwDoc = (d.documents || [])[0] || null; }).catch(() => {}),
 
-    // ── 2순위: 카카오 주소 검색 (NEIS 도로명주소 → 건물좌표) ──
-    try {
-      const addrRes = await fetch(
+      // 주소 검색: NEIS 도로명주소
+      fetch(
         'https://dapi.kakao.com/v2/local/search/address.json?' +
         new URLSearchParams({ query: searchAddr }),
         { headers: kakaoHeaders },
-      );
-      const addrData = await addrRes.json();
-      const doc = addrData?.documents?.[0];
-      // REGION 타입(행정구역 중심점)은 정확도가 낮아 제외
-      if (doc && doc.address_type !== 'REGION') {
-        return res.status(200).json({
-          result: { lat: parseFloat(doc.y), lon: parseFloat(doc.x) },
-          source: 'kakao-address',
-        });
+      ).then(r => r.json()).then(d => {
+        const doc = (d.documents || [])[0];
+        // REGION 타입(행정구역 중심점)은 정확도 낮아 제외
+        addrDoc = (doc && doc.address_type !== 'REGION') ? doc : null;
+      }).catch(() => {}),
+    ]);
+
+    if (kwDoc && addrDoc) {
+      // 두 결과가 모두 있으면 거리 교차검증
+      const kwLat = parseFloat(kwDoc.y), kwLon = parseFloat(kwDoc.x);
+      const adLat = parseFloat(addrDoc.y), adLon = parseFloat(addrDoc.x);
+      const gap = haversine(kwLat, kwLon, adLat, adLon);
+
+      if (gap <= 2000) {
+        // 2km 이내 → 키워드(학교 POI) 우선 (건물 입구 좌표로 더 정확)
+        return res.status(200).json({ result: { lat: kwLat, lon: kwLon }, source: 'kakao-keyword-verified' });
+      } else {
+        // 2km 초과 → 키워드가 다른 도시를 가리킴 → NEIS 주소 사용
+        return res.status(200).json({ result: { lat: adLat, lon: adLon }, source: 'kakao-address-verified' });
       }
-    } catch (_) {}
+    }
+
+    if (kwDoc) {
+      return res.status(200).json({
+        result: { lat: parseFloat(kwDoc.y), lon: parseFloat(kwDoc.x) },
+        source: 'kakao-keyword',
+      });
+    }
+
+    if (addrDoc) {
+      return res.status(200).json({
+        result: { lat: parseFloat(addrDoc.y), lon: parseFloat(addrDoc.x) },
+        source: 'kakao-address',
+      });
+    }
   }
 
   // ── 3순위: 행정안전부 도로명주소 API ──────────────
@@ -83,7 +100,6 @@ module.exports = async (req, res) => {
 
       if (juso && juso.length > 0) {
         const j = juso[0];
-
         try {
           const coordRes = await fetch(
             'https://business.juso.go.kr/addrlink/addrCoordApi.do?' +
