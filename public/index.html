@@ -344,7 +344,7 @@
       </div>
     </div>
 
-    <div class="station-header">🚉 가까운 역 (3km 이내)</div>
+    <div class="station-header">🚉 가까운 역 (1km 이내)</div>
     <div id="station-list"></div>
 
   </div>
@@ -955,7 +955,7 @@
     const elements = await overpassFetch(query, null, 12000);
 
     if (!elements.length) {
-      setHtml('station-list', '<div class="no-station">3km 이내 역이 없습니다</div>');
+      setHtml('station-list', '<div class="no-station">1km 이내 역이 없습니다</div>');
       return;
     }
 
@@ -977,12 +977,12 @@
         return true;
       });
 
-    const html = stations.map(function(st) {
-      const distTxt = st.dist < 1000 ? st.dist + 'm' : (st.dist/1000).toFixed(1) + 'km';
-      const color   = st.isSubway ? '#0284c7' : '#7c3aed';
-      const label   = st.isSubway ? '지하철' : '철도';
-      const emoji   = st.isSubway ? '🚇' : '🚆';
-      const stIcon  = L.divIcon({
+    // 지도 마커: 3km 이내 전체 (지하철=파랑, 철도=보라)
+    stations.forEach(function(st) {
+      const distTxt = st.dist < 1000 ? st.dist + 'm' : (st.dist / 1000).toFixed(1) + 'km';
+      const color = st.isSubway ? '#0284c7' : '#7c3aed';
+      const emoji = st.isSubway ? '🚇' : '🚆';
+      const stIcon = L.divIcon({
         className: '',
         html: '<div style="' +
           'display:inline-flex;align-items:center;gap:3px;' +
@@ -998,6 +998,18 @@
       const m = L.marker([st.lat, st.lon], { icon: stIcon })
         .addTo(map).bindPopup(emoji + ' ' + esc(st.name) + ' · ' + distTxt);
       stationMarkers.push(m);
+    });
+
+    // 패널: 1km 이내만 표시
+    const nearStations = stations.filter(function(s) { return s.dist <= 1000; });
+    if (!nearStations.length) {
+      setHtml('station-list', '<div class="no-station">1km 이내 역이 없습니다</div>');
+      return;
+    }
+    const html = nearStations.map(function(st) {
+      const distTxt = st.dist < 1000 ? st.dist + 'm' : (st.dist / 1000).toFixed(1) + 'km';
+      const color = st.isSubway ? '#0284c7' : '#7c3aed';
+      const label = st.isSubway ? '지하철' : '철도';
       return (
         '<div class="station-item">' +
           '<span class="station-badge" style="background:' + color + '">' + label + '</span>' +
