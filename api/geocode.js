@@ -19,24 +19,8 @@ module.exports = async (req, res) => {
   if (KAKAO_KEY) {
     const kakaoHeaders = { Authorization: 'KakaoAK ' + KAKAO_KEY };
 
-    // ── 1순위: 카카오 주소 검색 (NEIS 공식 도로명 주소 → 정확도 높음) ──
-    try {
-      const addrRes = await fetch(
-        'https://dapi.kakao.com/v2/local/search/address.json?' +
-        new URLSearchParams({ query: searchAddr }),
-        { headers: kakaoHeaders },
-      );
-      const addrData = await addrRes.json();
-      const doc = addrData?.documents?.[0];
-      if (doc) {
-        return res.status(200).json({
-          result: { lat: parseFloat(doc.y), lon: parseFloat(doc.x) },
-          source: 'kakao-address',
-        });
-      }
-    } catch (_) {}
-
-    // ── 2순위: 카카오 키워드 검색 (학교 POI, 주소 검색 실패 시 폴백) ──
+    // ── 1순위: 카카오 키워드 검색 (학교 POI 직접 조회 — 가장 정확) ──
+    // searchName = 풀네임 (예: "대구칠성초등학교") → 도시명 포함으로 유일하게 특정
     try {
       const kwRes = await fetch(
         'https://dapi.kakao.com/v2/local/search/keyword.json?' +
@@ -49,6 +33,24 @@ module.exports = async (req, res) => {
         return res.status(200).json({
           result: { lat: parseFloat(doc.y), lon: parseFloat(doc.x) },
           source: 'kakao-keyword',
+        });
+      }
+    } catch (_) {}
+
+    // ── 2순위: 카카오 주소 검색 (ROAD_ADDR 타입만 사용) ──
+    try {
+      const addrRes = await fetch(
+        'https://dapi.kakao.com/v2/local/search/address.json?' +
+        new URLSearchParams({ query: searchAddr }),
+        { headers: kakaoHeaders },
+      );
+      const addrData = await addrRes.json();
+      const doc = addrData?.documents?.[0];
+      // REGION 타입(행정구역 중심점)은 정확도가 낮아 제외
+      if (doc && doc.address_type !== 'REGION') {
+        return res.status(200).json({
+          result: { lat: parseFloat(doc.y), lon: parseFloat(doc.x) },
+          source: 'kakao-address',
         });
       }
     } catch (_) {}
