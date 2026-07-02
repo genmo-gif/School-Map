@@ -168,17 +168,44 @@ module.exports = async (req, res) => {
       '제주특별자치도':'126.1,33.6,126.9,33.1',
     };
     const cityKey = Object.keys(VIEWBOXES).find(k => searchAddr.startsWith(k)) || '';
-    const params = { q: shortName, format: 'json', limit: '1', countrycodes: 'kr' };
-    if (cityKey) { params.viewbox = VIEWBOXES[cityKey]; params.bounded = '1'; }
+    const viewboxParams = cityKey ? { viewbox: VIEWBOXES[cityKey], bounded: '1' } : {};
 
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 5000);
-    const nomRes = await fetch(
-      'https://nominatim.openstreetmap.org/search?' + new URLSearchParams(params),
-      { headers: { 'User-Agent': 'DGESchoolApp/1.0', 'Accept-Language': 'ko' }, signal: ctrl.signal },
-    );
-    clearTimeout(timer);
-    const nomData = await nomRes.json();
+    async function nominatimSearch(params) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 5000);
+      try {
+        const r = await fetch(
+          'https://nominatim.openstreetmap.org/search?' + new URLSearchParams(params),
+          { headers: { 'User-Agent': 'DGESchoolApp/1.0', 'Accept-Language': 'ko' }, signal: ctrl.signal },
+        );
+        return await r.json();
+      } finally { clearTimeout(timer); }
+    }
+
+    // 1순위: 학교명 그대로 검색 (OSM에 "대구대산초등학교"처럼 시/도 접두어가
+    // 포함된 채로 등록된 경우 대응 — 접두어를 떼면 오히려 매칭이 안 됨)
+    let nomData = await nominatimSearch({ q: searchName, format: 'json', limit: '1', countrycodes: 'kr', ...viewboxParams });
+
+    // 2순위: 시/도 접두어를 뗀 이름으로 검색 (OSM에 접두어 없이 등록된 일반적인 경우)
+    if (!nomData.length && shortName !== searchName) {
+      nomData = await nominatimSearch({ q: shortName, format: 'json', limit: '1', countrycodes: 'kr', ...viewboxParams });
+    }
+
+    // 3순위: amenity=school(유치원은 kindergarten) 구조화 검색으로 주변 학교 목록을 받아
+    // 이름이 일치하는 항목을 직접 매칭 (인근 학교 검색과 동일한 방식 — 가장 신뢰도 높음)
+    if (!nomData.length && cityKey) {
+      const amenity = searchName.includes('유치원') ? 'kindergarten' : 'school';
+      const amenityResults = await nominatimSearch({
+        amenity, format: 'json', limit: '50', countrycodes: 'kr', ...viewboxParams,
+      });
+      const match = amenityResults.find((item) => {
+        const poiName = (item.display_name || '').split(',')[0].trim();
+        return poiName === searchName || poiName === shortName
+          || poiName.includes(shortName) || shortName.includes(poiName);
+      });
+      if (match) nomData = [match];
+    }
+
     if (nomData.length > 0) {
       return res.status(200).json({
         result: { lat: parseFloat(nomData[0].lat), lon: parseFloat(nomData[0].lon) },
