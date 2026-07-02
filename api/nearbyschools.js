@@ -53,7 +53,10 @@ module.exports = async (req, res) => {
     try {
       const resp = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'DGESchoolApp/1.0',
+        },
         body: `data=${encodeURIComponent(query)}`,
       });
       if (!resp.ok) continue;

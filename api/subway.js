@@ -54,14 +54,16 @@ module.exports = async (req, res) => {
     } catch (_) {}
   }
 
-  // ── 2: Overpass 철도역 (subway 아닌 railway=station) ──
+  // ── 2: Overpass 전체 철도역 (지하철·경전철·모노레일·일반철도 모두 포함, 태그로 분류) ──
   const overpassQuery = [
     '[out:json][timeout:8];',
     '(',
-    `  node["railway"="station"]["station"!="subway"](around:${r},${lat},${lon});`,
+    `  node["railway"="station"](around:${r},${lat},${lon});`,
+    `  way["railway"="station"](around:${r},${lat},${lon});`,
     `  node["railway"="halt"](around:${r},${lat},${lon});`,
+    `  node["public_transport"="stop_position"]["subway"="yes"](around:${r},${lat},${lon});`,
     ');',
-    'out body;',
+    'out center;',
   ].join('\n');
 
   const MIRRORS = [
@@ -75,7 +77,10 @@ module.exports = async (req, res) => {
       const timer = setTimeout(() => ctrl.abort(), 9000);
       const resp = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'DGESchoolApp/1.0',
+        },
         body: `data=${encodeURIComponent(overpassQuery)}`,
         signal: ctrl.signal,
       });
@@ -85,15 +90,21 @@ module.exports = async (req, res) => {
       const seen = new Set(subwayStations.map(s => s.name));
       (data.elements || []).forEach(el => {
         const tags = el.tags || {};
+        const elat = el.lat ?? el.center?.lat;
+        const elon = el.lon ?? el.center?.lon;
         const name = tags['name:ko'] || tags.name || '';
-        if (!name || seen.has(name)) return;
+        if (!name || elat == null || elon == null || seen.has(name)) return;
         seen.add(name);
-        railwayStations.push({
+        // 지하철·경전철·모노레일(도시철도) = 지하철로, 그 외 일반철도 = 철도로 분류
+        const isSubway = ['subway', 'light_rail', 'monorail'].includes(tags.station)
+          || tags.subway === 'yes'
+          || tags['public_transport'] === 'stop_position';
+        (isSubway ? subwayStations : railwayStations).push({
           name,
-          lat: el.lat,
-          lon: el.lon,
-          type: 'railway',
-          distance: haversine(parseFloat(lat), parseFloat(lon), el.lat, el.lon),
+          lat: elat,
+          lon: elon,
+          type: isSubway ? 'subway' : 'railway',
+          distance: haversine(parseFloat(lat), parseFloat(lon), elat, elon),
         });
       });
       break;

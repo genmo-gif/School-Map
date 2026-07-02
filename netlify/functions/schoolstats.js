@@ -39,7 +39,9 @@ exports.handler = async (event) => {
     const res = await fetch(`${NEIS_BASE}/classInfo?${params}`);
     const data = await res.json();
     if (data.RESULT) return null;
-    return data.classInfo?.[1]?.row ?? null;
+    const rows = data.classInfo?.[1]?.row;
+    if (!rows) return null;
+    return Array.isArray(rows) ? rows : [rows];
   }
 
   let rows = null;

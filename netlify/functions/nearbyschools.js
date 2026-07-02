@@ -61,7 +61,10 @@ exports.handler = async (event) => {
     try {
       const res = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'DGESchoolApp/1.0',
+        },
         body: `data=${encodeURIComponent(query)}`,
       });
       if (!res.ok) continue;

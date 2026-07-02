@@ -21,7 +21,8 @@ exports.handler = async (event) => {
     const data = await res.json();
 
     // NEIS API returns { RESULT: { CODE, MESSAGE } } when no data / error
-    const rows = data.schoolInfo?.[1]?.row ?? [];
+    const rows = data.schoolInfo?.[1]?.row;
+    const normalizedRows = rows ? (Array.isArray(rows) ? rows : [rows]) : [];
 
     return {
       statusCode: 200,

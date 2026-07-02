@@ -19,10 +19,11 @@ module.exports = async (req, res) => {
     const r = await fetch(`${NEIS_BASE}/schoolInfo?${params}`);
     const data = await r.json();
 
-    const rows = data.schoolInfo?.[1]?.row ?? [];
+    const rows = data.schoolInfo?.[1]?.row;
+    const normalizedRows = rows ? (Array.isArray(rows) ? rows : [rows]) : [];
 
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.status(200).json({ schools: rows });
+    res.status(200).json({ schools: normalizedRows });
   } catch (err) {
     res.status(500).json({ error: err.message, schools: [] });
   }

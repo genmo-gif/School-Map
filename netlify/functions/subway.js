@@ -23,7 +23,7 @@ function lineLabel(tags) {
 }
 
 exports.handler = async (event) => {
-  const { lat, lon } = event.queryStringParameters || {};
+  const { lat, lon, radius } = event.queryStringParameters || {};
   if (!lat || !lon) {
     return {
       statusCode: 400,
@@ -32,14 +32,18 @@ exports.handler = async (event) => {
     };
   }
 
+  // 요청한 반경(m)을 존중한다. 지정이 없으면 3km, 최대 5km로 제한.
+  const r = Math.min(Math.max(parseInt(radius, 10) || 3000, 100), 5000);
+
   const query = [
     '[out:json][timeout:15];',
     '(',
-    `  node["railway"="station"](around:1000,${lat},${lon});`,
-    `  node["railway"="halt"](around:1000,${lat},${lon});`,
-    `  node["public_transport"="stop_position"]["subway"="yes"](around:1000,${lat},${lon});`,
+    `  node["railway"="station"](around:${r},${lat},${lon});`,
+    `  node["railway"="halt"](around:${r},${lat},${lon});`,
+    `  way["railway"="station"](around:${r},${lat},${lon});`,
+    `  node["public_transport"="stop_position"]["subway"="yes"](around:${r},${lat},${lon});`,
     ');',
-    'out body;',
+    'out center;',
   ].join('\n');
 
   const OVERPASS_MIRRORS = [
@@ -52,7 +56,10 @@ exports.handler = async (event) => {
     try {
       const res = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'DGESchoolApp/1.0',
+        },
         body: `data=${encodeURIComponent(query)}`,
       });
       if (!res.ok) continue;
@@ -68,17 +75,21 @@ exports.handler = async (event) => {
     const stations = (data.elements || [])
       .map((el) => {
         const tags = el.tags || {};
-        const isSubway = tags.station === 'subway' || tags.subway === 'yes'
+        const elat = el.lat ?? el.center?.lat;
+        const elon = el.lon ?? el.center?.lon;
+        const isSubway = ['subway', 'light_rail', 'monorail'].includes(tags.station)
+          || tags.subway === 'yes'
           || tags['public_transport'] === 'stop_position';
         return {
           name: tags['name:ko'] || tags.name || '이름 없음',
-          lat: el.lat,
-          lon: el.lon,
+          lat: elat,
+          lon: elon,
           type: isSubway ? 'subway' : 'railway',
           line: lineLabel(tags),
-          distance: haversine(parseFloat(lat), parseFloat(lon), el.lat, el.lon),
+          distance: haversine(parseFloat(lat), parseFloat(lon), elat, elon),
         };
       })
+      .filter((s) => s.lat != null && s.lon != null)
       .filter((s) => {
         if (seen.has(s.name)) return false;
         seen.add(s.name);
